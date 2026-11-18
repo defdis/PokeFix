@@ -9,6 +9,7 @@ import {
   setRotate,
 } from 'renderer/store/features/renderer';
 import {Icon} from '@iconify/react';
+import {useState} from 'react';
 import {ScreenshotAllArgs} from 'main/screenshot';
 import {selectActiveSuite} from 'renderer/store/features/device-manager';
 import {getDevicesMap} from 'common/deviceList';
@@ -38,6 +39,23 @@ const ToolBar = () => {
   const activeSuite = useSelector(selectActiveSuite);
   const dispatch = useDispatch();
   const playShutter = useShutterSound();
+  const [isAnnotating, setIsAnnotating] = useState(false);
+
+  // Annotate mode is forced ON or OFF in every mounted webview (not toggled,
+  // so previews never desync); macOS may swallow the in-webview shortcut.
+  const handleAnnotateToggle = () => {
+    const next = !isAnnotating;
+    const webViews = document.querySelectorAll<Electron.WebviewTag>('webView');
+    webViews.forEach((webview) => {
+      webview
+        .executeJavaScript(
+          `window.baAnnotatorSetEnabled ? window.baAnnotatorSetEnabled(${next}) : false`,
+          true
+        )
+        .catch(() => undefined);
+    });
+    setIsAnnotating(next);
+  };
 
   function handleInspectShortcut() {
     dispatch(setIsInspecting(!isInspecting));
@@ -129,6 +147,14 @@ const ToolBar = () => {
         >
           <Icon icon="lucide:camera" fontSize={15} />
           Capture
+        </ToolbarAction>
+        <ToolbarAction
+          onClick={handleAnnotateToggle}
+          isActive={isAnnotating}
+          title="Annotate — Alt+click elements to mark them for the agent (get_annotations)"
+        >
+          <Icon icon="lucide:highlighter" fontSize={15} />
+          Annotate
         </ToolbarAction>
         <ColorBlindnessControls />
         <ColorSchemeToggle />

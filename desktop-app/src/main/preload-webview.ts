@@ -262,10 +262,27 @@ const baToggleMode = () => {
   if (state.active) {
     // Hostile pages may clear overlays; ensure the badge exists each toggle-on.
     baShowToggleBadge({active: true, items: state.items});
+    baDrawMarks(state);
+  } else {
+    baShowToggleBadge(state);
+    baHidePopover();
+    baDrawMarks(state);
+  }
+  return state.active;
+};
+
+const baSetEnabled = (enabled: boolean): boolean => {
+  const state = baReadState();
+  state.active = enabled;
+  baWriteState(state);
+  if (state.active) {
+    baShowToggleBadge({active: true, items: state.items});
   } else {
     baShowToggleBadge(state);
     baHidePopover();
   }
+  baDrawMarks(state);
+  return state.active;
 };
 
 let baPopover: HTMLElement | null = null;
@@ -454,6 +471,10 @@ const baAnnotatorInit = () => {
     count: () => baReadState().items.length,
   };
   (window as unknown as Record<string, unknown>).baAnnotationApi = api;
+  // Toolbar button drives every webview uniformly through executeJavaScript
+  // (macOS may swallow the Cmd+Shift+. shortcut before it reaches the guest).
+  (window as unknown as Record<string, unknown>).baAnnotatorSetEnabled = baSetEnabled;
+  (window as unknown as Record<string, unknown>).baAnnotatorToggle = baToggleMode;
 
   window.addEventListener('click', (event) => baAnnotateClick(event as MouseEvent), true);
   window.addEventListener('keydown', (event) => {
