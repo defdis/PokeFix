@@ -45,7 +45,13 @@ export interface McpBeacon {
 }
 
 export type McpBridgeCommand =
-  'get-app-state' | 'navigate' | 'list-devices' | 'set-active-devices' | 'get-capture-targets';
+  | 'get-app-state'
+  | 'navigate'
+  | 'list-devices'
+  | 'set-active-devices'
+  | 'get-capture-targets'
+  | 'get-annotations'
+  | 'clear-annotations';
 
 export interface McpBridgeRequest {
   requestId: string;
@@ -119,5 +125,33 @@ export interface McpSkippedCapture {
 
 export interface McpCaptureTargetsResult {
   targets: McpCaptureTarget[];
+  skipped: McpSkippedCapture[];
+}
+
+export interface McpAnnotation {
+  index: number;
+  tag: string;
+  text: string;
+  selector: string;
+  feedback: string;
+}
+
+export interface McpViewportAnnotations {
+  deviceName: string;
+  width: number;
+  height: number;
+  url: string;
+  pageTitle: string;
+  annotations: McpAnnotation[];
+  formatted: string;
+}
+
+export interface McpAnnotationsResult {
+  viewports: McpViewportAnnotations[];
+  skipped: McpSkippedCapture[];
+}
+
+export interface McpClearAnnotationsResult {
+  cleared: string[];
   skipped: McpSkippedCapture[];
 }

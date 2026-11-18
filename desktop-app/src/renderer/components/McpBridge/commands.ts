@@ -1,15 +1,19 @@
 import {Device, getDevicesMap} from 'common/deviceList';
 import {
   McpActiveDevice,
+  McpAnnotation,
+  McpAnnotationsResult,
   McpAppState,
   McpBridgeCommand,
   McpCaptureTargetsPayload,
   McpCaptureTargetsResult,
+  McpClearAnnotationsResult,
   McpDeviceInfo,
   McpNavigatePayload,
   McpNavigateResult,
   McpSetActiveDevicesPayload,
   McpSetActiveDevicesResult,
+  McpViewportAnnotations,
 } from 'common/mcp';
 import {Store} from 'redux';
 import {selectActiveSuite, setSuiteDevices} from 'renderer/store/features/device-manager';
@@ -208,6 +212,112 @@ const getCaptureTargets = (
   return result;
 };
 
+const collectAnnotations = async (state: RootState): Promise<McpAnnotationsResult> => {
+  const result: McpAnnotationsResult = {viewports: [], skipped: []};
+  for (const device of getActiveDevices(state)) {
+    const webview = getDeviceWebview(device.name);
+    if (webview === null) {
+      result.skipped.push({
+        deviceName: device.name,
+        reason: 'preview is not mounted (the Focused layout shows a single device)',
+      });
+      continue;
+    }
+    let pageTitle: string;
+    try {
+      pageTitle = webview.getTitle();
+    } catch {
+      // Webview still attaching — keep the app-level title.
+      pageTitle = state.renderer.pageTitle;
+    }
+    await collectViewportAnnotations(webview, device, pageTitle, result);
+  }
+  return result;
+};
+
+const collectViewportAnnotations = async (
+  webview: Electron.WebviewTag,
+  device: Device,
+  pageTitle: string,
+  result: McpAnnotationsResult
+): Promise<void> => {
+  let raw: unknown;
+  try {
+    const serialized = (await webview.executeJavaScript(
+      'JSON.stringify(window.baAnnotationApi ? window.baAnnotationApi.get() : [])',
+      true
+    )) as unknown;
+    raw = JSON.parse(typeof serialized === 'string' ? serialized : '[]');
+  } catch (error) {
+    result.skipped.push({
+      deviceName: device.name,
+      reason: `collect failed: ${error instanceof Error ? error.message : String(error)}`,
+    });
+    return;
+  }
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return;
+  }
+  const annotations: McpAnnotation[] = raw.map((item, i) => {
+    const record = item as Partial<McpAnnotation>;
+    return {
+      index: typeof record.index === 'number' ? record.index : i + 1,
+      tag: typeof record.tag === 'string' ? record.tag : 'element',
+      text: typeof record.text === 'string' ? record.text : '',
+      selector: typeof record.selector === 'string' ? record.selector : '',
+      feedback: typeof record.feedback === 'string' ? record.feedback : '',
+    };
+  });
+  const lines: string[] = [];
+  annotations.forEach((annotation, i) => {
+    lines.push(`### ${i + 1}. ${annotation.tag} "${annotation.text}"`);
+    lines.push(`Selector: ${annotation.selector}`);
+    lines.push(`Feedback: ${annotation.feedback || '—'}`);
+    if (i < annotations.length - 1) {
+      lines.push('');
+    }
+  });
+  const viewport: McpViewportAnnotations = {
+    deviceName: device.name,
+    width: device.width,
+    height: device.height,
+    url: safeGetUrl(webview),
+    pageTitle,
+    annotations,
+    formatted: lines.join('\n'),
+  };
+  result.viewports.push(viewport);
+};
+
+const safeGetUrl = (webview: Electron.WebviewTag): string => {
+  try {
+    return webview.getURL();
+  } catch {
+    return '';
+  }
+};
+
+const clearAllAnnotations = (state: RootState): McpClearAnnotationsResult => {
+  const result: McpClearAnnotationsResult = {cleared: [], skipped: []};
+  getActiveDevices(state).forEach((device) => {
+    const webview = getDeviceWebview(device.name);
+    if (webview === null) {
+      result.skipped.push({deviceName: device.name, reason: 'preview is not mounted'});
+      return;
+    }
+    try {
+      webview.executeJavaScript('window.baAnnotationApi && window.baAnnotationApi.clear()', true);
+      result.cleared.push(device.name);
+    } catch (error) {
+      result.skipped.push({
+        deviceName: device.name,
+        reason: `clear failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+  return result;
+};
+
 export const executeMcpCommand = async (
   store: AppStore,
   command: McpBridgeCommand,
@@ -224,6 +334,10 @@ export const executeMcpCommand = async (
       return navigate(store, payload as McpNavigatePayload);
     case 'get-capture-targets':
       return getCaptureTargets(store.getState(), (payload ?? {}) as McpCaptureTargetsPayload);
+    case 'get-annotations':
+      return collectAnnotations(store.getState());
+    case 'clear-annotations':
+      return clearAllAnnotations(store.getState());
     default:
       throw new Error(`Unknown MCP command: ${command}`);
   }

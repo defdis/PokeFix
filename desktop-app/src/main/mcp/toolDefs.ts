@@ -109,6 +109,21 @@ export const toolDefs = {
         .describe('Optional device id or exact name; omit to capture all active devices'),
     },
   },
+  get_annotations: {
+    description:
+      'Collect the annotation marks a human reviewer left in Responsively App device viewports ' +
+      '(the reviewer toggles annotate mode with Cmd/Ctrl+Shift+. and Alt+clicks the elements ' +
+      'they want the agent to look at, optionally adding a feedback note). Returns, per device ' +
+      'viewport that has annotations, the page URL, viewport size, and each mark as an ordered ' +
+      'list entry with its tag, visible text, CSS selector, and the optional feedback note. ' +
+      'Use these selectors and notes to understand exactly which UI elements to fix or implement.',
+  },
+  clear_annotations: {
+    description:
+      'Remove all annotation marks from every device viewport in Responsively App after the ' +
+      'feedback has been collected with get_annotations, so the reviewer can start a new ' +
+      'annotation pass on a clean slate.',
+  },
 };
 
 export type ToolName = keyof typeof toolDefs;

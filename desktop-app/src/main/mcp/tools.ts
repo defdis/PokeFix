@@ -2,7 +2,9 @@ import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {webContents} from 'electron';
 import {
   McpAppState,
+  McpAnnotationsResult,
   McpCaptureTargetsResult,
+  McpClearAnnotationsResult,
   McpDeviceInfo,
   McpNavigateResult,
   McpSetActiveDevicesResult,
@@ -189,6 +191,65 @@ export const registerTools = (server: McpServer, getMainWindow: GetMainWindow) =
         });
       }
       return {content};
+    } catch (error) {
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool('get_annotations', toolDefs.get_annotations, async () => {
+    try {
+      const result = await sendBridgeCommand<McpAnnotationsResult>(
+        getMainWindow,
+        'get-annotations'
+      );
+      if (result.viewports.length === 0) {
+        const skippedNote =
+          result.skipped.length > 0
+            ? ` (${result.skipped.map((s) => s.deviceName).join(', ')} are not mounted)`
+            : '';
+        return textResult({
+          message: `No annotations collected yet.${skippedNote} The reviewer toggles annotate mode with Cmd/Ctrl+Shift+. then Alt+clicks elements in the device previews.`,
+        });
+      }
+      const lines: string[] = ['Feedback:'];
+      result.viewports.forEach((viewport) => {
+        lines.push('');
+        lines.push(
+          `For ${viewport.deviceName} (${viewport.width}x${viewport.height}) — ${viewport.url}`
+        );
+        lines.push(viewport.formatted);
+      });
+      if (result.skipped.length > 0) {
+        lines.push('');
+        lines.push(
+          `Skipped viewports: ${result.skipped.map((s) => `${s.deviceName} (${s.reason})`).join('; ')}`
+        );
+      }
+      return {content: [{type: 'text', text: lines.join('\n')}]};
+    } catch (error) {
+      return errorResult(error);
+    }
+  });
+
+  server.registerTool('clear_annotations', toolDefs.clear_annotations, async () => {
+    try {
+      const result = await sendBridgeCommand<McpClearAnnotationsResult>(
+        getMainWindow,
+        'clear-annotations'
+      );
+      const parts: string[] = [];
+      if (result.cleared.length > 0) {
+        parts.push(`Cleared annotations in: ${result.cleared.join(', ')}`);
+      }
+      if (result.skipped.length > 0) {
+        parts.push(
+          `Skipped: ${result.skipped.map((s) => `${s.deviceName} (${s.reason})`).join('; ')}`
+        );
+      }
+      if (parts.length === 0) {
+        parts.push('No active viewports to clear.');
+      }
+      return textResult({result: parts.join('\n')});
     } catch (error) {
       return errorResult(error);
     }

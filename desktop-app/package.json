@@ -240,5 +240,6 @@
       "src/common/**/*"
     ],
     "logLevel": "quiet"
-  }
+  },
+  "packageManager": "yarn@4.9.2"
 }
