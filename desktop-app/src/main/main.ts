@@ -180,7 +180,9 @@ if (process.env.E2E_TEST === 'true') {
 const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true';
 
 if (isDebug) {
-  electronDebug();
+  // showDevTools: false — electron-debug's default opens DevTools on every
+  // window at launch, which read as "the app starts with DevTools open".
+  electronDebug({showDevTools: false});
 
   // Electron warns about Chrome extension permissions it doesn't implement
   // (e.g. Redux DevTools' 'contextMenus'). Node prints warnings through a
@@ -243,7 +245,11 @@ let isBrowserSyncInitiated = false;
 
 const createWindow = async () => {
   windowShownOnOpen = false;
-  if (process.env.E2E_TEST !== 'true') {
+  // The devtools-installer extensions (notably REDUX_DEVTOOLS) auto-open a
+  // detached DevTools window on every launch in dev mode, which confused
+  // users into thinking the app opens with DevTools. Opt back in with
+  // ENABLE_DEVTOOLS_EXTENSIONS=1 yarn start.
+  if (process.env.ENABLE_DEVTOOLS_EXTENSIONS === '1' && process.env.E2E_TEST !== 'true') {
     await installExtensions();
   }
 

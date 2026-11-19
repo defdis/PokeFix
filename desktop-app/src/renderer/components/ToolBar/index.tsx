@@ -8,8 +8,9 @@ import {
   setIsInspecting,
   setRotate,
 } from 'renderer/store/features/renderer';
+import {setDevtoolsClose, selectIsDevtoolsOpen} from 'renderer/store/features/devtools';
 import {Icon} from '@iconify/react';
-import {useState} from 'react';
+import {useCallback, useState} from 'react';
 import {ScreenshotAllArgs} from 'main/screenshot';
 import {selectActiveSuite} from 'renderer/store/features/device-manager';
 import {getDevicesMap} from 'common/deviceList';
@@ -35,6 +36,7 @@ import {ColorBlindnessControls} from './ColorBlindnessControls';
 const ToolBar = () => {
   const rotateDevices = useSelector(selectRotate);
   const isInspecting = useSelector(selectIsInspecting);
+  const isDevtoolsOpen = useSelector(selectIsDevtoolsOpen);
   const isCapturingScreenshot = useSelector(selectIsCapturingScreenshot);
   const activeSuite = useSelector(selectActiveSuite);
   const dispatch = useDispatch();
@@ -43,9 +45,37 @@ const ToolBar = () => {
 
   // Annotate mode is forced ON or OFF in every mounted webview (not toggled,
   // so previews never desync); macOS may swallow the in-webview shortcut.
-  const handleAnnotateToggle = () => {
+  const handleAnnotateToggle = async () => {
     const next = !isAnnotating;
-    const webViews = document.querySelectorAll<Electron.WebviewTag>('webView');
+    if (next && isInspecting) {
+      // The CDP point-to-inspect overlay intercepts preview clicks at the
+      // Chromium level, so it must not run together with annotate mode.
+      dispatch(setIsInspecting(false));
+    }
+    const webViews = Array.from(document.querySelectorAll<Electron.WebviewTag>('webView'));
+    if (next) {
+      for (const webview of webViews) {
+        const hasApi = await webview
+          .executeJavaScript('Boolean(window.baAnnotatorSetEnabled)', true)
+          .catch(() => false);
+        if (!hasApi) {
+          // The annotator preload injects on the next page load — reload the
+          // preview so pages opened before the last rebuild get the overlay.
+          webview.reload();
+          await new Promise<void>((resolve) => {
+            const onLoaded = () => {
+              webview.removeEventListener('did-finish-load', onLoaded);
+              resolve();
+            };
+            webview.addEventListener('did-finish-load', onLoaded);
+            setTimeout(() => {
+              webview.removeEventListener('did-finish-load', onLoaded);
+              resolve();
+            }, 8000);
+          });
+        }
+      }
+    }
     webViews.forEach((webview) => {
       webview
         .executeJavaScript(
@@ -57,8 +87,38 @@ const ToolBar = () => {
     setIsAnnotating(next);
   };
 
+  const closeDevtoolsPanel = useCallback(() => {
+    window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.CLOSE_DEVTOOLS);
+    dispatch(setDevtoolsClose());
+    dispatch(setIsInspecting(false));
+  }, [dispatch]);
+
+  useKeyboardShortcut(SHORTCUT_CHANNEL.DEVTOOLS_CLOSE, closeDevtoolsPanel);
+
   function handleInspectShortcut() {
-    dispatch(setIsInspecting(!isInspecting));
+    const next = !isInspecting;
+    if (next && isAnnotating) {
+      // Annotate alt-clicks and the CDP inspect overlay fight for the same
+      // preview clicks — enabling inspect disables annotate first.
+      const webViews = document.querySelectorAll<Electron.WebviewTag>('webView');
+      webViews.forEach((webview) => {
+        webview
+          .executeJavaScript(
+            'window.baAnnotatorSetEnabled ? window.baAnnotatorSetEnabled(false) : false',
+            true
+          )
+          .catch(() => undefined);
+      });
+      setIsAnnotating(false);
+    }
+    if (!next && isDevtoolsOpen) {
+      // Turning inspect off while the devtools panel is showing closes the
+      // whole panel — the tucked-away close icon in the dock header is hard
+      // to spot (user report: the panel looked unclosable).
+      closeDevtoolsPanel();
+      return;
+    }
+    dispatch(setIsInspecting(next));
   }
 
   const screenshotCaptureHandler = async () => {
