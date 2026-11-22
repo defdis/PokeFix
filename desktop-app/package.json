@@ -1,7 +1,7 @@
 {
   "name": "pokefix",
   "productName": "Pokefix",
-  "version": "2.0.0-beta.0",
+  "version": "1.0.0",
   "description": "Pokefix — multi-viewport browser for responsive UI work, with an MCP bridge that hands marked-up elements to AI agents.",
   "keywords": [
     "developer-tools",
