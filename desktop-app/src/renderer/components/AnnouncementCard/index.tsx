@@ -9,8 +9,10 @@ import {selectAnnouncements, selectIsPresenting, setWhatsNewSeen} from 'renderer
 const shortVersion = (version: string) => version.split('.').slice(0, 2).join('.');
 
 const WHATS_NEW_ROWS: Array<{icon: string; label: string}> = [
-  {icon: 'lucide:plug-zap', label: 'MCP server — connect Claude, Codex & more'},
-  {icon: 'lucide:presentation', label: 'Canvas mode for presentations & recordings'},
+  {icon: 'lucide:highlighter', label: 'Annotate any element (Alt-click), straight to your agent'},
+  {icon: 'lucide:message-square', label: 'In-app agent chat — Claude Code, Hermes & more'},
+  {icon: 'lucide:plug-zap', label: 'MCP: get_session_handoff & get_annotations for warm context'},
+  {icon: 'lucide:frame', label: 'Focus mode device badge; Masonry packs without clipping'},
 ];
 
 /**
