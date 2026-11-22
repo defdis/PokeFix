@@ -414,6 +414,39 @@ baHoverElement.id = 'ba-annotator-hover';
 baHoverElement.style.cssText =
   'position:absolute;display:none;z-index:2147483645;border-radius:2px;' +
   'background:rgba(79,140,255,.22);border:2px solid #4f8cff;pointer-events:none;';
+// DevTools-style box-model bands: orange = margin, green = padding.
+const baMakeBand = (id: string, color: string): HTMLDivElement => {
+  const el = document.createElement('div');
+  el.id = id;
+  el.style.cssText = `position:absolute;display:none;z-index:2147483644;pointer-events:none;background:${color};`;
+  return el;
+};
+const baHoverMargin = baMakeBand('ba-annotator-hover-margin', 'rgba(246,178,107,.45)');
+const baHoverPadding = baMakeBand('ba-annotator-hover-padding', 'rgba(147,196,125,.5)');
+const baHoverLabel = document.createElement('div');
+baHoverLabel.id = 'ba-annotator-hover-label';
+baHoverLabel.style.cssText =
+  'position:absolute;display:none;z-index:2147483646;pointer-events:none;' +
+  'background:rgba(17,17,22,.92);color:#e8e8ea;font:11px/1.5 -apple-system,system-ui,sans-serif;' +
+  'padding:2px 7px;border-radius:4px;white-space:pre;box-shadow:0 1px 4px rgba(0,0,0,.4);';
+const baClipBand = (
+  outer: {x: number; y: number; w: number; h: number},
+  inner: {x: number; y: number; w: number; h: number}
+): string =>
+  `polygon(evenodd, 0 0, ${outer.w}px 0, ${outer.w}px ${outer.h}px, 0 ${outer.h}px, ` +
+  `${inner.x}px ${inner.y}px, 0 ${inner.y}px, 0 ${inner.y + inner.h}px, ${inner.x}px ${inner.y + inner.h}px, ${inner.x + inner.w}px ${inner.y + inner.h}px, ${inner.x + inner.w}px ${inner.y}px)`;
+// px helpers for box-model math
+const baPx = (value: string): number => {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+};
+const baFmtBox = (values: number[]): string => {
+  const rounded = values.map((v) => {
+    const abs = Math.abs(v) < 0.5 ? 0 : Math.round(v * 10) / 10;
+    return Number.isInteger(abs) ? String(abs) : abs.toFixed(1);
+  });
+  return rounded.every((v) => v === rounded[0]) ? rounded[0] : rounded.join(' ');
+};
 
 let baPicking = false;
 /**
@@ -452,13 +485,18 @@ const baSetPicking = (picking: boolean) => {
 
 const baIsOwnElement = (target: EventTarget | null): boolean =>
   target instanceof Element &&
-  target.closest('#ba-annotator-popover, #ba-annotator-badge, #ba-annotator-hover') !== null;
+  target.closest(
+    '#ba-annotator-popover, #ba-annotator-badge, #ba-annotator-hover, #ba-annotator-hover-margin, #ba-annotator-hover-padding, #ba-annotator-hover-label'
+  ) !== null;
 
 const baAltHeld = (event: MouseEvent | KeyboardEvent): boolean =>
   event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey;
 
 const baHideHover = () => {
   baHoverElement.style.display = 'none';
+  baHoverMargin.style.display = 'none';
+  baHoverPadding.style.display = 'none';
+  baHoverLabel.style.display = 'none';
 };
 
 const baHoverMove = (event: MouseEvent) => {
@@ -477,6 +515,71 @@ const baHoverMove = (event: MouseEvent) => {
   style.top = `${rect.top + window.scrollY}px`;
   style.width = `${rect.width}px`;
   style.height = `${rect.height}px`;
+
+  // Box-model bands: margin outside the border box, padding between border
+  // and content box. Same math DevTools shows, minus the sidebar.
+  const cs = window.getComputedStyle(target);
+  const mt = baPx(cs.marginTop),
+    mr = baPx(cs.marginRight),
+    mb = baPx(cs.marginBottom),
+    ml = baPx(cs.marginLeft);
+  const bt = baPx(cs.borderTopWidth),
+    br = baPx(cs.borderRightWidth),
+    bb = baPx(cs.borderBottomWidth),
+    bl = baPx(cs.borderLeftWidth);
+  const pt = baPx(cs.paddingTop),
+    pr = baPx(cs.paddingRight),
+    pb = baPx(cs.paddingBottom),
+    pl = baPx(cs.paddingLeft);
+  const sx = window.scrollX;
+  const sy = window.scrollY;
+
+  const mLeft = rect.left - ml + sx;
+  const mTop = rect.top - mt + sy;
+  const mWidth = rect.width + ml + mr;
+  const mHeight = rect.height + mt + mb;
+  if (mWidth > 0 && mHeight > 0 && (mt !== 0 || mr !== 0 || mb !== 0 || ml !== 0)) {
+    baHoverMargin.style.display = 'block';
+    baHoverMargin.style.left = `${mLeft}px`;
+    baHoverMargin.style.top = `${mTop}px`;
+    baHoverMargin.style.width = `${mWidth}px`;
+    baHoverMargin.style.height = `${mHeight}px`;
+    baHoverMargin.style.clipPath = baClipBand(
+      {x: 0, y: 0, w: mWidth, h: mHeight},
+      {x: ml, y: mt, w: rect.width, h: rect.height}
+    );
+  } else {
+    baHoverMargin.style.display = 'none';
+  }
+
+  const contentW = rect.width - bl - br - pl - pr;
+  const contentH = rect.height - bt - bb - pt - pb;
+  if (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    (pt !== 0 || pr !== 0 || pb !== 0 || pl !== 0) &&
+    contentW >= 0 &&
+    contentH >= 0
+  ) {
+    baHoverPadding.style.display = 'block';
+    baHoverPadding.style.left = `${rect.left + sx}px`;
+    baHoverPadding.style.top = `${rect.top + sy}px`;
+    baHoverPadding.style.width = `${rect.width}px`;
+    baHoverPadding.style.height = `${rect.height}px`;
+    baHoverPadding.style.clipPath = baClipBand(
+      {x: 0, y: 0, w: rect.width, h: rect.height},
+      {x: bl + pl, y: bt + pt, w: contentW, h: contentH}
+    );
+  } else {
+    baHoverPadding.style.display = 'none';
+  }
+
+  // Compact value chip: `m T R B L · p T R B L` (single value collapses).
+  baHoverLabel.textContent = `m ${baFmtBox([mt, mr, mb, ml])}  ·  p ${baFmtBox([pt, pr, pb, pl])}`;
+  baHoverLabel.style.display = 'block';
+  const labelTop = mTop - 26 >= window.scrollY + 4 ? mTop - 26 : rect.bottom + sy + 6;
+  baHoverLabel.style.left = `${Math.max(mLeft, 4)}px`;
+  baHoverLabel.style.top = `${labelTop}px`;
 };
 
 const baHoverLeaveWindow = () => {
@@ -862,7 +965,10 @@ const baAnnotatorInit = () => {
   // append synchronously only when it exists, otherwise after DOMContentLoaded
   // (a null-documentElement throw killed init before the mousemove wiring).
   const attachHoverElement = () => {
+    document.documentElement.appendChild(baHoverMargin);
+    document.documentElement.appendChild(baHoverPadding);
     document.documentElement.appendChild(baHoverElement);
+    document.documentElement.appendChild(baHoverLabel);
   };
   if (document.documentElement != null) {
     attachHoverElement();
