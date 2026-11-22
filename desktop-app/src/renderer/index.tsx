@@ -1,4 +1,5 @@
 import {IPC_MAIN_CHANNELS} from 'common/constants';
+import './icons-generated';
 import {createRoot} from 'react-dom/client';
 import App from './AppContent';
 

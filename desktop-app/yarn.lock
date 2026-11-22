@@ -2200,6 +2200,114 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@iconify-json/bx@npm:^1.2.3":
+  version: 1.2.3
+  resolution: "@iconify-json/bx@npm:1.2.3"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/8cdaf288fc70ddd579c28e742d371a50eb988170bf195d728d0d13508d23d6203f94e9b21bb81be81576e9dab05236b32b0d4797d1c3eb3a936c9434e1f77f9f
+  languageName: node
+  linkType: hard
+
+"@iconify-json/carbon@npm:^1.2.30":
+  version: 1.2.30
+  resolution: "@iconify-json/carbon@npm:1.2.30"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/1b6b5137d0f4d74c84c209ff2c04eb1b9f8d4b29f5954f0fa71843cad62ff209d86078bd616d1222400440f4bfb930b4808f7484995757b0d4540dfdfc71292a
+  languageName: node
+  linkType: hard
+
+"@iconify-json/ei@npm:^1.2.2":
+  version: 1.2.2
+  resolution: "@iconify-json/ei@npm:1.2.2"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/e7f4f561851ac33632b6b2b9f6e00de660589edf15bd4916061346e84a65e2d22ff68ecce7001636cebc55b31de5bae0513d5aa80004b12b5be6e90c87a43a1c
+  languageName: node
+  linkType: hard
+
+"@iconify-json/fluent@npm:^1.2.62":
+  version: 1.2.62
+  resolution: "@iconify-json/fluent@npm:1.2.62"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/9452845e596721ee315425f231d3baae8363ae44828ac58c6cade882d48a9b05a4ed8cac057dd8c086622ab225f0c6025f1b19ead289c149d6ea7af32441388e
+  languageName: node
+  linkType: hard
+
+"@iconify-json/heroicons@npm:^1.2.3":
+  version: 1.2.3
+  resolution: "@iconify-json/heroicons@npm:1.2.3"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/121a0e8bd6cd2091b0ceeb334754a068253cf6cc819f4cc18acfba66a4d59bcd092ce6c476a584d3a0874242b9c7f21459f24bfba3bb6a75d63f46cf31e701f4
+  languageName: node
+  linkType: hard
+
+"@iconify-json/ic@npm:^1.2.4":
+  version: 1.2.4
+  resolution: "@iconify-json/ic@npm:1.2.4"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/b0e4d01a1b259defb391412b263ac4adb80d7b87161a0aac1a14fa748ee6e805a855f3e5635d66beb896082d0a4ee160fb3365fdcc44f2cf54687e2585922fa4
+  languageName: node
+  linkType: hard
+
+"@iconify-json/iconoir@npm:^1.2.12":
+  version: 1.2.12
+  resolution: "@iconify-json/iconoir@npm:1.2.12"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/4ff576803b4465e384246de32e06a13883068af91be39946159e38faadff671456c0c93ae53126f511b773406f8f879c30238b773b178f4f117aa97c6a6f9457
+  languageName: node
+  linkType: hard
+
+"@iconify-json/line-md@npm:^1.2.16":
+  version: 1.2.16
+  resolution: "@iconify-json/line-md@npm:1.2.16"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/5afaab4cd0745db2819f67564b18d00a040de003c90c2c62e9ff1a3eb6815b2fd62a9fecee8594ca093b8e841e9a49337f64365b67e868a899890ec1bc4b6c6f
+  languageName: node
+  linkType: hard
+
+"@iconify-json/lucide@npm:^1.2.158":
+  version: 1.2.158
+  resolution: "@iconify-json/lucide@npm:1.2.158"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/cbc03479f87da0cd773beee37b9926afd8700fe694b01f7f5c28a32c93a189471b51a6c30f91f35a8ed34726f85d726357690dd8ae27caefd346a48492afad3d
+  languageName: node
+  linkType: hard
+
+"@iconify-json/mdi@npm:^1.2.3":
+  version: 1.2.3
+  resolution: "@iconify-json/mdi@npm:1.2.3"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/4d11426abba03464e5ebe4675c87cc39c720e54b7c28265ff9ccd93f229a51f7616bb0a8f1c01412eac3cc9a1ebdc0a122bbaa3395c14d30834d96f8a141e96d
+  languageName: node
+  linkType: hard
+
+"@iconify-json/tdesign@npm:^1.2.20":
+  version: 1.2.20
+  resolution: "@iconify-json/tdesign@npm:1.2.20"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/0fc7d7c22b91440002b966593d7bb610466f2bdd8f27761e1a5ddb86109377c8c7bfebdf2f6da49112242ec198b823b0ad2bd1a478b52e5387ee30bcdbadb858
+  languageName: node
+  linkType: hard
+
+"@iconify-json/uil@npm:^1.2.3":
+  version: 1.2.3
+  resolution: "@iconify-json/uil@npm:1.2.3"
+  dependencies:
+    "@iconify/types": "npm:*"
+  checksum: 10c0/4d2d1ecc9839ef6a9d66a878bf41201c41e4b16b66fc58b22123d87dc612508ff73a71a0eeab3a12175d8ba3d891b6490401fd2ea5075b4dde6faecb58db8da9
+  languageName: node
+  linkType: hard
+
 "@iconify/react@npm:^6.0.2":
   version: 6.0.2
   resolution: "@iconify/react@npm:6.0.2"
@@ -2211,7 +2319,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@iconify/types@npm:^2.0.0":
+"@iconify/types@npm:*, @iconify/types@npm:^2.0.0":
   version: 2.0.0
   resolution: "@iconify/types@npm:2.0.0"
   checksum: 10c0/65a3be43500c7ccacf360e136d00e1717f050b7b91da644e94370256ac66f582d59212bdb30d00788aab4fc078262e91c95b805d1808d654b72f6d2072a7e4b2
@@ -11984,6 +12092,18 @@ __metadata:
     "@fontsource/jetbrains-mono": "npm:^5.3.0"
     "@fontsource/lato": "npm:^5.3.0"
     "@headlessui/react": "npm:^2.2.10"
+    "@iconify-json/bx": "npm:^1.2.3"
+    "@iconify-json/carbon": "npm:^1.2.30"
+    "@iconify-json/ei": "npm:^1.2.2"
+    "@iconify-json/fluent": "npm:^1.2.62"
+    "@iconify-json/heroicons": "npm:^1.2.3"
+    "@iconify-json/ic": "npm:^1.2.4"
+    "@iconify-json/iconoir": "npm:^1.2.12"
+    "@iconify-json/line-md": "npm:^1.2.16"
+    "@iconify-json/lucide": "npm:^1.2.158"
+    "@iconify-json/mdi": "npm:^1.2.3"
+    "@iconify-json/tdesign": "npm:^1.2.20"
+    "@iconify-json/uil": "npm:^1.2.3"
     "@iconify/react": "npm:^6.0.2"
     "@modelcontextprotocol/sdk": "npm:^1.31.0"
     "@playwright/test": "npm:^1.63.0"
