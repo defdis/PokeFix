@@ -62,7 +62,7 @@ const renderRichText = (text: string) => {
       );
     }
     return (
-      <p key={`text-${index}`} className="whitespace-pre-wrap">
+      <p key={`text-${index}`} className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
         {renderInline(segment, `s${index}`)}
       </p>
     );
@@ -83,7 +83,7 @@ const ChatMessage = memo(function ChatMessage({item}: {item: ChatItem}) {
   if (item.kind === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[82%] rounded-2xl rounded-br-md bg-sky-600/90 px-3 py-2 text-[12px] leading-snug text-white">
+        <div className="max-w-[82%] rounded-2xl rounded-br-md bg-sky-600/90 px-3 py-2 text-[12px] leading-snug [overflow-wrap:anywhere] break-words text-white">
           {item.text}
         </div>
       </div>
@@ -155,6 +155,8 @@ const AgentChat = () => {
   const [unread, setUnread] = useState(false);
   const unreadRef = useRef(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
   const idRef = useRef(0);
   const nextId = () => `m-${(idRef.current += 1)}`;
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -367,6 +369,21 @@ const AgentChat = () => {
       setUnread(false);
     }
   }, [open]);
+
+  // Permission cards render below the fold when the user is scrolled up (or
+  // reading a long reply): jump to the bottom and badge the FAB, otherwise
+  // the agent sits blocked on an approval nobody saw.
+  useEffect(() => {
+    if (!permission) {
+      return;
+    }
+    scrollToBottom(true);
+    if (!openRef.current && !unreadRef.current) {
+      unreadRef.current = true;
+      setUnread(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permission]);
 
   const sendText = async (rawText: string) => {
     const text = rawText.trim();
@@ -586,7 +603,7 @@ const AgentChat = () => {
 
             {permission && (
               <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2">
-                <p className="mb-1.5 text-[11px] font-semibold text-amber-300">
+                <p className="mb-1.5 text-[11px] font-semibold break-all text-amber-300">
                   Агент просит разрешение: {permission.title}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
