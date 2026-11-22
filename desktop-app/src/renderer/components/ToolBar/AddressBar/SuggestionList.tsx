@@ -1,11 +1,7 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import cx from 'classnames';
-
-export interface HistoryItem {
-  title: string;
-  url: string;
-  lastVisited: number;
-}
+import {Icon} from '@iconify/react';
+import {getHistory, type HistoryEntry as HistoryItem} from 'renderer/lib/historyCache';
 
 interface Props {
   match: string;
@@ -14,15 +10,21 @@ interface Props {
 
 const SuggestionList = ({match, onEnter}: Props) => {
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [history] = useState<HistoryItem[]>(window.electron.store.get('history'));
+  const [history] = useState<HistoryItem[]>(getHistory);
 
-  const suggestions = useMemo(() => {
-    return history
-      .filter((item) => {
-        return `${item.title}-${item.url}`.toLowerCase().includes(match.toLowerCase());
-      })
-      .slice(0, 10);
-  }, [match, history]);
+  const lowered = useMemo(
+    () => history.map((item) => ({item, hay: `${item.title}-${item.url}`.toLowerCase()})),
+    [history]
+  );
+  const needle = match.toLowerCase();
+  const suggestions = useMemo(
+    () =>
+      lowered
+        .filter(({hay}) => hay.includes(needle))
+        .slice(0, 10)
+        .map(({item}) => item),
+    [lowered, needle]
+  );
 
   const keyDownHandler = useCallback(
     (e: KeyboardEvent) => {
@@ -71,12 +73,9 @@ const SuggestionList = ({match, onEnter}: Props) => {
           type="button"
           key={url}
         >
-          <span>
-            <img
-              src={`https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${url}&size=64`}
-              className="w-4 rounded-md"
-              alt="favicon"
-            />
+          <span className="flex h-4 w-4 items-center justify-center">
+            {/* No network favicons (leaks typed URLs to Google, blocks paint): use a local glyph. */}
+            <Icon icon="mdi:web" fontSize={16} className="text-slate-400" />
           </span>
           <span className="flex flex-row gap-1 overflow-hidden">
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{title}</span>-

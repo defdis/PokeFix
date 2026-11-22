@@ -44,13 +44,30 @@ const requestFlush = () => {
   }
 };
 
+const isLocalHostname = (hostname: string): boolean => {
+  const h = hostname.toLowerCase();
+  return (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    h === '[::1]' ||
+    h === '::1' ||
+    h.endsWith('.localhost') ||
+    h.endsWith('.local') ||
+    h.endsWith('.test') ||
+    h.endsWith('.lvh.me')
+  );
+};
+
 const documentBodyInit = () => {
-  // Browser Sync
-  const bsPort = ipcRenderer.sendSync(IPC_MAIN_CHANNELS.GET_BROWSER_SYNC_PORT);
-  const bsScript = window.document.createElement('script');
-  bsScript.src = `https://localhost:${bsPort}/browser-sync/browser-sync-client.js?v=2.27.10`;
-  bsScript.async = true;
-  window.document.body.appendChild(bsScript);
+  // Browser Sync: only for local pages — a remote production site gains nothing
+  // from the client and the request is pure noise (and breaks under CSP).
+  if (isLocalHostname(window.location.hostname)) {
+    const bsPort = ipcRenderer.sendSync(IPC_MAIN_CHANNELS.GET_BROWSER_SYNC_PORT);
+    const bsScript = window.document.createElement('script');
+    bsScript.src = `https://localhost:${bsPort}/browser-sync/browser-sync-client.js?v=2.27.10`;
+    bsScript.async = true;
+    window.document.body.appendChild(bsScript);
+  }
 
   // Context Menu
   window.addEventListener('contextmenu', (e) => {
@@ -239,7 +256,24 @@ const DEFAULT_CONFIG: BaAnnotatorConfig = {
   clearAfterCopy: false,
 };
 
+// Fast path for pages where annotations were never used: the mousemove
+// handler must not pay for sessionStorage + JSON.parse on every event.
+// Invalidated by baWriteState, so it is always coherent with real writes.
+let baStateKnownAbsent = false;
+const baBottomState = (): BaAnnotationState => ({
+  active: false,
+  items: [],
+  config: {...DEFAULT_CONFIG},
+  hidden: false,
+  clearedItems: [],
+});
+
 const baReadState = (): BaAnnotationState => {
+  if (baStateKnownAbsent) {
+    const live = (window as unknown as Record<string, unknown>)[BA_WINDOW_KEY] as
+      BaAnnotationState | undefined;
+    if (!live) return baBottomState();
+  }
   const merged = (state: BaAnnotationState): BaAnnotationState => {
     // Older persisted payloads miss the config keys; hidden stays runtime-only
     // so that after a reload marks always start visible.
@@ -263,6 +297,9 @@ const baReadState = (): BaAnnotationState => {
   if (existing && Array.isArray(existing.items)) {
     return merged(existing);
   }
+  if (baStateKnownAbsent) {
+    return baBottomState();
+  }
   // Survive page reloads within the same webview session.
   try {
     const persisted = JSON.parse(
@@ -270,15 +307,18 @@ const baReadState = (): BaAnnotationState => {
     ) as BaAnnotationState | null;
     if (persisted && Array.isArray(persisted.items)) {
       persisted.active = false;
+      baStateKnownAbsent = false;
       return merged(persisted);
     }
   } catch {
     // sessionStorage unavailable (sandboxed page) — memory-only mode.
   }
-  return {active: false, items: [], config: {...DEFAULT_CONFIG}, hidden: false, clearedItems: []};
+  baStateKnownAbsent = true;
+  return baBottomState();
 };
 
 const baWriteState = (state: BaAnnotationState) => {
+  baStateKnownAbsent = false;
   (window as unknown as Record<string, unknown>)[BA_WINDOW_KEY] = state;
   try {
     window.sessionStorage.setItem(

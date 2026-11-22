@@ -17,7 +17,11 @@ import {
   setLayout,
 } from 'renderer/store/features/renderer';
 import type {RootState} from '../../../store';
-import {selectDesignOverlay, type ViewResolution} from '../../../store/features/design-overlay';
+import {
+  selectDesignOverlay,
+  selectDesignOverlayEnabled,
+  type ViewResolution,
+} from '../../../store/features/design-overlay';
 import {
   Coordinates,
   selectRuler,
@@ -102,6 +106,14 @@ const Device = ({isPrimary, device, setIndividualDevice}: Props) => {
   // useSelector re-renders every Device on every dispatch.
   const rulerActive = useSelector((state: RootState) => selectRulerEnabled(state)(resolution));
   const ruler = useSelector((state: RootState) => selectRuler(state)(resolution));
+  const designOverlayEnabled = useSelector((state: RootState) =>
+    selectDesignOverlayEnabled(state)(resolution)
+  );
+  // Scroll coordinates are only consumed by the ruler and the design overlay;
+  // re-rendering the whole DeviceFrame per guest scroll frame otherwise.
+  const coordinatesConsumersActive = rulerActive || designOverlayEnabled;
+  const coordinatesConsumersRef = useRef(coordinatesConsumersActive);
+  coordinatesConsumersRef.current = coordinatesConsumersActive;
 
   const [coordinates, setCoordinates] = useState<Coordinates>({
     deltaX: 0,
@@ -111,6 +123,7 @@ const Device = ({isPrimary, device, setIndividualDevice}: Props) => {
     innerWidth: width * 2,
     innerHeight: height * 2,
   });
+  const coordinatesRef = useRef(coordinates);
 
   const toggleRuler = useCallback(() => {
     if (!ref.current) {
@@ -132,14 +145,22 @@ const Device = ({isPrimary, device, setIndividualDevice}: Props) => {
           resolution,
           rulerState: {
             isRulerEnabled: true,
-            rulerCoordinates: coordinates,
+            rulerCoordinates: coordinatesRef.current,
           },
         })
       );
     }
-  }, [dispatch, ruler, coordinates, resolution]);
+  }, [dispatch, ruler, resolution]);
 
   useKeyboardShortcut(SHORTCUT_CHANNEL.TOGGLE_RULERS, toggleRuler);
+
+  // When a consumer (ruler/overlay) turns on, seed the state with the latest
+  // scroll position so it doesn't lag one scroll frame behind.
+  useEffect(() => {
+    if (coordinatesConsumersActive) {
+      setCoordinates(coordinatesRef.current);
+    }
+  }, [coordinatesConsumersActive]);
 
   const onRotateHandler = (state: boolean) =>
     dispatch(setIndividualRotation({id: device.id, rotated: state}));
@@ -162,14 +183,19 @@ const Device = ({isPrimary, device, setIndividualDevice}: Props) => {
     }
     const ipcMessageHandler = (e: Electron.IpcMessageEvent) => {
       if (e.channel === 'pass-scroll-data') {
-        setCoordinates({
+        const next = {
           deltaX: e.args[0].coordinates.x,
           deltaY: e.args[0].coordinates.y,
           scrollX: e.args[0].coordinates.scrollX,
           scrollY: e.args[0].coordinates.scrollY,
           innerHeight: e.args[0].innerHeight,
           innerWidth: e.args[0].innerWidth,
-        });
+        };
+        coordinatesRef.current = next;
+        // No consumer (ruler off, overlay off) -> skip the re-render entirely.
+        if (coordinatesConsumersRef.current) {
+          setCoordinates(next);
+        }
       }
       if (e.channel === 'pass-pinch-data') {
         // Map the guest-viewport focal point into host coordinates: the

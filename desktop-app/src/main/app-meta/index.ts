@@ -1,7 +1,8 @@
 import {app, ipcMain, shell} from 'electron';
 import path from 'path';
 import {IPC_MAIN_CHANNELS} from '../../common/constants';
-import store, {isRendererStoreKey} from '../../store';
+import {isRendererStoreKey} from '../../store';
+import {bufferStoreWrite, readStoreKey} from '../store-write-buffer';
 import log from '../logging';
 
 export interface AppMetaResponse {
@@ -43,19 +44,16 @@ export const initAppMetaHandlers = () => {
       event.returnValue = undefined;
       return;
     }
-    event.returnValue = store.get(val);
+    event.returnValue = readStoreKey(val);
   });
   ipcMain.on(IPC_MAIN_CHANNELS.ELECTRON_STORE_SET, (_, key, val) => {
     if (!isRendererStoreKey(key)) {
       log.warn('[store-bridge] blocked write to key', key);
       return;
     }
-    try {
-      store.set(key, val);
-    } catch (error) {
-      // A schema-invalid value must not take down the main process.
-      log.warn('[store-bridge] rejected write', key, error);
-    }
+    // Buffered + coalesced (see store-write-buffer): hot drags (e.g. overlay
+    // opacity) no longer serialize the whole config per mousemove tick.
+    bufferStoreWrite(key, val);
   });
 
   ipcMain.on(IPC_MAIN_CHANNELS.OPEN_EXTERNAL, async (_, {url}) => {

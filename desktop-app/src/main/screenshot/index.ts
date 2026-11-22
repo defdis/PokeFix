@@ -41,21 +41,19 @@ export const captureImage = async (
   }
   const WebContents = webContents.fromId(webContentsId);
 
-  const isExecuted = await WebContents?.executeJavaScript(`
-    if (window.isExecuted) {
-      true;
-    }
-  `);
-
-  if (!isExecuted) {
-    await WebContents?.executeJavaScript(`
+  // One round trip: make the background opaque unless we already did it.
+  await WebContents?.executeJavaScript(`
+    (() => {
+      if (window.isExecuted) {
+        return;
+      }
       const bgColor = window.getComputedStyle(document.body).backgroundColor;
       if (bgColor === 'rgba(0, 0, 0, 0)') {
         document.body.style.backgroundColor = 'white';
       }
       window.isExecuted = true;
-    `);
-  }
+    })();
+  `);
 
   // capturePage throws (e.g. UnknownVizError) or hands back an empty frame
   // while the guest's compositor surface is still settling — typically right
@@ -96,7 +94,8 @@ const quickScreenshot = async (arg: ScreenshotArgs): Promise<ScreenshotResult> =
   const dir = store.get('userPreferences.screenshot.saveLocation');
   const filePath = path.join(dir, `/${fileName}-${Date.now()}.jpeg`);
   await ensureDir(dir);
-  await writeFile(filePath, image.toJPEG(100));
+  // 85 is visually identical for UI captures and ~2x smaller than q100.
+  await writeFile(filePath, image.toJPEG(85));
   if (process.env.E2E_TEST === 'true') {
     // Record the call for E2E test verification without opening Finder
     const g = global as typeof globalThis & {__e2eShowItemCalls?: string[]};

@@ -38,6 +38,7 @@ import {AppUpdater} from './app-updater';
 import {getSavedWindowState, trackWindowState} from './window-state';
 import electronDebug from 'electron-debug';
 import log, {initCrashHandlers, initLogging} from './logging';
+import {flushStoreWrites} from './store-write-buffer';
 import {injectHostIntoCsp} from './csp';
 import {isOpenableUrl} from './url-validation';
 import {initAgentChat, killAgentChat} from './acp-chat';
@@ -344,10 +345,14 @@ const createWindow = async () => {
     }
   });
 
-  mainWindow.on('ready-to-show', async () => {
+  mainWindow.on('ready-to-show', () => {
+    // Never gate first paint on browser-sync (local HTTPS server): if it fails,
+    // the app must still open — live reload is a nice-to-have, not the product.
     if (!isBrowserSyncInitiated) {
-      await initInstance();
       isBrowserSyncInitiated = true;
+      initInstance().catch((error) => {
+        log.warn('[browser-sync] init failed; live reload disabled this session', error);
+      });
     }
 
     if (!mainWindow) {
@@ -436,6 +441,7 @@ app.on('certificate-error', (event, _, url, __, ___, callback) => {
 });
 
 app.on('will-quit', () => {
+  flushStoreWrites();
   killAgentChat();
 });
 

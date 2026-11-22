@@ -30,6 +30,7 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 - `src/renderer/components/McpBridge/` — исполняет MCP-команды в webviews
 - `src/main/screenshot/` — скриншоты кадров (использовать для аннотаций, не изобретать своё)
 - `src/renderer/components/ToolBar/McpPanel/` — UI-панель MCP (toggle, copy-config)
+- Перфоманс: рендерер не дёргает `executeJavaScript` по таймеру без нужды; аннотаторный поллинг двухфазный (signature → full fetch при изменениях); electron-store записи из рендерера коалесцируются в main (`store-write-buffer.ts`, flush 250мс + на will-quit); первый paint не ждёт browser-sync (`ready-to-show` не await'ит initInstance, BS-клиент инжектится только в local-страницы); скролл-координаты в Device — только пока открыта линейка/оверлей; чтение истории — через renderer-кэш `lib/historyCache.ts` (никакого sync sendSync на каждый keystroke)
 - `src/main/local-servers.ts` + `ToolBar/LocalServers/` — кнопка монитора в адресной строке: lsof + HTTP-проба (title) юзерских localhost-сервисов; клик → открыть во всех вьюпортах; IPC `BA_LIST_LOCAL_SERVERS`, кэш 5с, свой 12719/12720 исключены
 - `src/main/preload-webview.ts` (через `.erb` конфиги `webpack.config.preload-webview`) — инъекция в каждый webview — точка для аннотатор-оверлея
 

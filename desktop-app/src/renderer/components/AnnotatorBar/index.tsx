@@ -175,6 +175,134 @@ const AnnotatorBar = () => {
 
   useEffect(() => {
     if (!isOpen) {
+      setEntries([]);
+      return undefined;
+    }
+    let disposed = false;
+    // Per-webview probe cache: skip the expensive fetch+map when nothing
+    // relevant changed. The guest computes a rolling hash of the marks, so
+    // the IPC payload while idle is ~60 bytes instead of the full list.
+    const probeCache = new Map<string, {key: string; entries: BarEntry[]}>();
+    let canRestoreAny = false;
+    const collect = async () => {
+      if (document.hidden) {
+        return;
+      }
+      canRestoreAny = false;
+      const collected = await Promise.all(
+        listWebviews().map(async (webview, position) => {
+          try {
+            // Phase 1 (cheap): re-arm mode, re-apply config, return a signature.
+            const probeUnknown = await webview.executeJavaScript(
+              `(() => {
+                if (window.baAnnotatorSetEnabled) { window.baAnnotatorSetEnabled(true); }
+                if (window.baAnnotationApi) {
+                  window.baAnnotationApi.configure(${JSON.stringify(configRef.current)});
+                  window.baAnnotationApi.setHidden(${hiddenRef.current ? 'true' : 'false'});
+                  const items = window.baAnnotationApi.get();
+                  let h = 5381;
+                  const s = JSON.stringify(items);
+                  for (let i = 0; i < s.length; i += 1) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+                  return {
+                    sig: (h >>> 0).toString(16) + ':' + s.length,
+                    url: window.location.href,
+                    canRestore:
+                      typeof window.baAnnotationApi.canRestore === 'function'
+                        ? !!window.baAnnotationApi.canRestore()
+                        : false,
+                  };
+                }
+                return {sig: '0:0', url: '', canRestore: false};
+              })()`,
+              false
+            );
+            const probe = probeUnknown as {sig?: string; url?: string; canRestore?: boolean} | null;
+            const sig = probe?.sig ?? '0:0';
+            canRestoreAny = canRestoreAny || Boolean(probe?.canRestore);
+            const webviewId = String(webview.getWebContentsId?.() ?? position);
+            const deviceName = (() => {
+              try {
+                return (
+                  webview.getAttribute('data-device-name') ||
+                  webview.getTitle() ||
+                  `Preview ${position + 1}`
+                );
+              } catch (error) {
+                return `Preview ${position + 1}`;
+              }
+            })();
+            // offsetWidth/offsetHeight = CSS pixels of the webview element.
+            const viewport = `${webview.offsetWidth}x${webview.offsetHeight}`;
+            const cacheKey = `${probe?.url ?? ''}|${viewport}|${sig}|${deviceName}`;
+            const cached = probeCache.get(webviewId);
+            if (cached && cached.key === cacheKey) {
+              return cached.entries;
+            }
+            // Phase 2 (only on change): fetch the full list.
+            const itemsUnknown = await webview.executeJavaScript(
+              'window.baAnnotationApi ? window.baAnnotationApi.get() : []',
+              false
+            );
+            const items: unknown = itemsUnknown;
+            if (!Array.isArray(items)) {
+              return [];
+            }
+            const entries = (items as BarEntry[]).map((item) => ({
+              ...item,
+              device: deviceName,
+              url: probe?.url ?? '',
+              viewport,
+              webviewId,
+            }));
+            probeCache.set(webviewId, {key: cacheKey, entries});
+            return entries;
+          } catch (error) {
+            return [];
+          }
+        })
+      );
+      if (!disposed) {
+        const flat = collected.flat();
+        setEntries((current) => {
+          if (current.length === flat.length) {
+            let same = true;
+            for (let i = 0; i < flat.length; i += 1) {
+              const a = current[i];
+              const b = flat[i];
+              if (
+                a === b ||
+                (a.device === b.device &&
+                  a.url === b.url &&
+                  a.index === b.index &&
+                  a.feedback === b.feedback &&
+                  a.selector === b.selector &&
+                  a.text === b.text &&
+                  a.viewport === b.viewport)
+              ) {
+                continue;
+              }
+              same = false;
+              break;
+            }
+            if (same) {
+              return current;
+            }
+          }
+          return flat;
+        });
+        setCanRestore((prev) => (prev === canRestoreAny ? prev : canRestoreAny));
+      }
+    };
+    const timer = setInterval(collect, 1500);
+    collect();
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
       setPicking(false);
       return undefined;
     }

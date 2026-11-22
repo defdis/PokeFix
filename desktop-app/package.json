@@ -48,7 +48,6 @@
     "test:e2e:debug": "playwright test --config=e2e/playwright.config.ts --debug",
     "typecheck": "tsc --noEmit"
   },
-  "browserslist": [],
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/lato": "^5.3.0",
@@ -64,14 +63,12 @@
     "electron-log": "^5.4.4",
     "electron-store": "^11.0.2",
     "electron-updater": "^6.8.10",
-    "javascript-time-ago": "^2.6.4",
     "mousetrap": "^1.6.5",
     "re-resizable": "^6.11.2",
     "react": "^19.3.0",
     "react-dnd": "^16.0.1",
     "react-dnd-html5-backend": "^16.0.1",
     "react-dom": "^19.3.0",
-    "react-markdown": "^10.1.0",
     "react-redux": "^9.3.0",
     "react-tabs": "^6.1.1",
     "redux": "^5.0.1",
@@ -112,7 +109,6 @@
     "@types/react-dom": "^19.3.0",
     "@types/webpack-bundle-analyzer": "^4.7.0",
     "concurrently": "^10.0.5",
-    "core-js": "^3.50.0",
     "cross-env": "^10.1.0",
     "css-loader": "^7.1.5",
     "css-minimizer-webpack-plugin": "^8.0.0",
@@ -166,12 +162,15 @@
     "productName": "Pokefix",
     "appId": "app.pokefix",
     "asar": true,
-    "asarUnpack": "**\\*.{node,dll}",
+    "asarUnpack": "**/*.{node,dll}",
     "files": [
       "dist",
       "!dist/mcp",
       "node_modules",
-      "package.json"
+      "package.json",
+      "!**/*.map",
+      "!**/@types/**",
+      "!**/node-gyp/**"
     ],
     "afterSign": ".erb/scripts/notarize.js",
     "mac": {
@@ -219,19 +218,24 @@
       "output": "release/build"
     },
     "extraResources": [
-      "./assets/**",
+      {
+        "from": "assets/icon.png",
+        "to": "assets/icon.png"
+      },
       {
         "from": "release/app/dist/mcp",
-        "to": "mcp"
+        "to": "mcp",
+        "filter": [
+          "**/*",
+          "!**/*.map"
+        ]
       },
       {
         "from": "src/renderer/components/Previewer/Device/frames/NOTICE.md",
         "to": "licenses/device-frames-NOTICE.md"
       }
     ],
-    "publish": {
-      "provider": "github"
-    }
+    "compression": "maximum"
   },
   "resolutions": {
     "@types/react": "^19.3.0",

@@ -91,12 +91,26 @@ const probeHttp = (port: number): Promise<string | null | undefined> =>
   });
 
 const LIST_CACHE_MS = 5000;
+const PROBE_CONCURRENCY = 8;
 let cache: {at: number; servers: LocalServerInfo[]} | null = null;
+let pendingList: Promise<LocalServerInfo[]> | null = null;
 
-export const listLocalServers = async (): Promise<LocalServerInfo[]> => {
+export const listLocalServers = (): Promise<LocalServerInfo[]> => {
   if (cache && Date.now() - cache.at < LIST_CACHE_MS) {
-    return cache.servers;
+    return Promise.resolve(cache.servers);
   }
+  // De-dupe concurrent invocations — a click-happy user must not spawn N lsof
+  // processes and N×ports probes in parallel.
+  if (pendingList) {
+    return pendingList;
+  }
+  pendingList = scanLocalServers().finally(() => {
+    pendingList = null;
+  });
+  return pendingList;
+};
+
+const scanLocalServers = async (): Promise<LocalServerInfo[]> => {
   const candidates = await new Promise<Array<{port: number; process: string}>>((resolve) => {
     execFile(
       'lsof',
@@ -112,15 +126,22 @@ export const listLocalServers = async (): Promise<LocalServerInfo[]> => {
       }
     );
   });
-  const probed = await Promise.all(
-    candidates.slice(0, MAX_SERVERS).map(async ({port, process}) => {
-      const title = await probeHttp(port);
-      if (title === undefined) {
-        return null; // not HTTP — not a debug target
-      }
-      return {port, process, url: `http://localhost:${port}/`, title};
-    })
-  );
+  const slice = candidates.slice(0, MAX_SERVERS);
+  // Probe in small batches so a box with many listeners doesn't fan out
+  // 20 simultaneous connections.
+  const probed: Array<LocalServerInfo | null> = [];
+  for (let i = 0; i < slice.length; i += PROBE_CONCURRENCY) {
+    const batch = await Promise.all(
+      slice.slice(i, i + PROBE_CONCURRENCY).map(async ({port, process}) => {
+        const title = await probeHttp(port);
+        if (title === undefined) {
+          return null; // not HTTP — not a debug target
+        }
+        return {port, process, url: `http://localhost:${port}/`, title};
+      })
+    );
+    probed.push(...batch);
+  }
   const result = probed.filter((s): s is LocalServerInfo => s !== null);
   cache = {at: Date.now(), servers: result};
   return result;

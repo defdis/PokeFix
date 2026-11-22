@@ -9,6 +9,7 @@ import {APP_VIEWS, setAppView} from 'renderer/store/features/ui';
 import ShortcutsModal from '../../Shortcuts/ShortcutsModal';
 import Bookmark from './Bookmark';
 import {SettingsContent} from './Settings/SettingsContent';
+import {clearHistory} from 'renderer/lib/historyCache';
 
 interface MenuItemProps {
   icon: string;
@@ -71,7 +72,7 @@ const MenuFlyout = ({closeFlyout}: Props) => {
           icon="carbon:trash-can"
           label="Clear browsing history"
           onClick={() => {
-            window.electron.store.set('history', []);
+            clearHistory();
             closeFlyout();
           }}
         />

@@ -1,15 +1,21 @@
 import {useEffect, useRef, useState} from 'react';
 import {IPC_MAIN_CHANNELS} from 'common/constants';
 import {AboutDialogArgs} from 'main/menu/help';
-import TimeAgo from 'javascript-time-ago';
-import en from 'javascript-time-ago/locale/en';
 import Icon from '../../assets/img/logo.png';
 import Modal from '../Modal';
 import Button from '../Button';
 
-TimeAgo.addLocale(en);
-
-const timeAgo = new TimeAgo('en-US');
+const relativeTime = new Intl.RelativeTimeFormat('en', {numeric: 'auto'});
+const timeAgo = (date: Date): string => {
+  const deltaMs = date.getTime() - Date.now();
+  const abs = Math.abs(deltaMs);
+  const minutes = Math.round(deltaMs / 60_000);
+  if (abs < 45_000) return 'just now';
+  if (abs < 3_600_000) return relativeTime.format(minutes, 'minute');
+  const hours = Math.round(deltaMs / 3_600_000);
+  if (abs < 86_400_000) return relativeTime.format(hours, 'hour');
+  return relativeTime.format(Math.round(deltaMs / 86_400_000), 'day');
+};
 
 export const AboutDialog = () => {
   const [show, setShow] = useState(false);
@@ -144,7 +150,7 @@ export const AboutDialog = () => {
               <span>Last Checked</span>
               <span className="text-sm">
                 {args?.updaterStatus.lastChecked != null
-                  ? timeAgo.format(args?.updaterStatus.lastChecked)
+                  ? timeAgo(new Date(args.updaterStatus.lastChecked))
                   : 'NA'}
               </span>
             </div>

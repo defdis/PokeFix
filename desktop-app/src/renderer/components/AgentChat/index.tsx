@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Icon} from '@iconify/react';
 import cx from 'classnames';
 import {IPC_MAIN_CHANNELS} from 'common/constants';
@@ -79,6 +79,57 @@ const toolStatusIcon = (status: string): {icon: string; className: string} => {
   return {icon: 'lucide:loader-circle', className: 'text-amber-300 animate-spin'};
 };
 
+const ChatMessage = memo(function ChatMessage({item}: {item: ChatItem}) {
+  if (item.kind === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[82%] rounded-2xl rounded-br-md bg-sky-600/90 px-3 py-2 text-[12px] leading-snug text-white">
+          {item.text}
+        </div>
+      </div>
+    );
+  }
+  if (item.kind === 'assistant') {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-white/5 bg-[#141d33] px-3 py-2 text-[12px] leading-snug text-slate-100">
+          {renderRichText(item.text)}
+          {item.streaming && <span className="animate-pulse text-sky-400">▍</span>}
+        </div>
+      </div>
+    );
+  }
+  if (item.kind === 'tool') {
+    const {icon, className} = toolStatusIcon(item.status);
+    return (
+      <div className="flex justify-start pl-1">
+        <details className="max-w-full rounded-lg border border-white/5 bg-white/[0.03] px-2 py-1">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-200">
+            <Icon icon={icon} fontSize={11} className={className} />
+            <span className="max-w-[240px] truncate font-mono">{item.title}</span>
+            <span className="text-[9px] text-slate-600 uppercase">{item.status}</span>
+          </summary>
+          {item.text ? (
+            <pre className="mt-1 max-h-32 overflow-auto border-t border-white/5 pt-1 font-mono text-[9.5px] whitespace-pre-wrap text-slate-400">
+              {item.text}
+            </pre>
+          ) : null}
+        </details>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cx(
+        'mx-auto w-fit max-w-full rounded-md px-2 py-1 text-center text-[10px]',
+        item.tone === 'error' ? 'bg-red-500/10 text-red-300' : 'text-slate-500'
+      )}
+    >
+      {item.text}
+    </div>
+  );
+});
+
 /**
  * Floating "support chat" style panel that talks to a real agent CLI in ACP
  * mode (Hermes / OpenCode today). Streams tokens, shows tool calls and
@@ -102,18 +153,30 @@ const AgentChat = () => {
   const [tokens, setTokens] = useState<number | null>(null);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [unread, setUnread] = useState(false);
+  const unreadRef = useRef(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
   const idRef = useRef(0);
   const nextId = () => `m-${(idRef.current += 1)}`;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
 
+  const scrollRaf = useRef<number | null>(null);
+  const lastScrollHeight = useRef(0);
   const scrollToBottom = useCallback((force = false) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (force || stickToBottom.current) {
-      el.scrollTop = el.scrollHeight;
+    if (scrollRaf.current !== null) {
+      return; // one flush per frame is enough
     }
+    scrollRaf.current = window.requestAnimationFrame(() => {
+      scrollRaf.current = null;
+      const el = scrollRef.current;
+      if (!el) return;
+      if (force || stickToBottom.current) {
+        if (force || el.scrollHeight !== lastScrollHeight.current) {
+          el.scrollTop = el.scrollHeight;
+          lastScrollHeight.current = el.scrollHeight;
+        }
+      }
+    });
   }, []);
 
   const pushNote = useCallback((text: string, tone: 'error' | 'info' = 'info') => {
@@ -197,7 +260,10 @@ const AgentChat = () => {
             }
             return prev; // thoughts are intentionally not rendered
           });
-          setUnread(true);
+          if (!unreadRef.current) {
+            unreadRef.current = true;
+            setUnread(true);
+          }
           scrollToBottom();
           return;
         }
@@ -296,7 +362,10 @@ const AgentChat = () => {
 
   useEffect(() => {
     window.localStorage.setItem(OPEN_KEY, open ? '1' : '0');
-    if (open) setUnread(false);
+    if (open) {
+      unreadRef.current = false;
+      setUnread(false);
+    }
   }, [open]);
 
   const sendText = async (rawText: string) => {
@@ -511,57 +580,9 @@ const AgentChat = () => {
                 вычитает их через MCP (get_annotations).
               </div>
             )}
-            {items.map((item) => {
-              if (item.kind === 'user') {
-                return (
-                  <div key={item.id} className="flex justify-end">
-                    <div className="max-w-[82%] rounded-2xl rounded-br-md bg-sky-600/90 px-3 py-2 text-[12px] leading-snug text-white">
-                      {item.text}
-                    </div>
-                  </div>
-                );
-              }
-              if (item.kind === 'assistant') {
-                return (
-                  <div key={item.id} className="flex justify-start">
-                    <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-white/5 bg-[#141d33] px-3 py-2 text-[12px] leading-snug text-slate-100">
-                      {renderRichText(item.text)}
-                      {item.streaming && <span className="animate-pulse text-sky-400">▍</span>}
-                    </div>
-                  </div>
-                );
-              }
-              if (item.kind === 'tool') {
-                const {icon, className} = toolStatusIcon(item.status);
-                return (
-                  <div key={item.id} className="flex justify-start pl-1">
-                    <details className="max-w-full rounded-lg border border-white/5 bg-white/[0.03] px-2 py-1">
-                      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-200">
-                        <Icon icon={icon} fontSize={11} className={className} />
-                        <span className="max-w-[240px] truncate font-mono">{item.title}</span>
-                        <span className="text-[9px] text-slate-600 uppercase">{item.status}</span>
-                      </summary>
-                      {item.text ? (
-                        <pre className="mt-1 max-h-32 overflow-auto border-t border-white/5 pt-1 font-mono text-[9.5px] whitespace-pre-wrap text-slate-400">
-                          {item.text}
-                        </pre>
-                      ) : null}
-                    </details>
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={item.id}
-                  className={cx(
-                    'mx-auto w-fit max-w-full rounded-md px-2 py-1 text-center text-[10px]',
-                    item.tone === 'error' ? 'bg-red-500/10 text-red-300' : 'text-slate-500'
-                  )}
-                >
-                  {item.text}
-                </div>
-              );
-            })}
+            {items.map((item) => (
+              <ChatMessage key={item.id} item={item} />
+            ))}
 
             {permission && (
               <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2">

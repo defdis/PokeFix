@@ -131,12 +131,47 @@ const Previewer = () => {
     null
   );
 
+  // rAF-coalesced pan: pointermove fires far more often than frames; keep the
+  // world transform state to one update per frame.
+  const panRafRef = useRef<number | null>(null);
+  const pendingPanRef = useRef<{x: number; y: number} | null>(null);
+  const requestPan = (pan: {x: number; y: number}) => {
+    panShadowRef.current = pan;
+    pendingPanRef.current = pan;
+    if (panRafRef.current !== null) {
+      return;
+    }
+    panRafRef.current = window.requestAnimationFrame(() => {
+      panRafRef.current = null;
+      if (pendingPanRef.current) {
+        setCanvasPan(pendingPanRef.current);
+        pendingPanRef.current = null;
+      }
+    });
+  };
+  useEffect(
+    () => () => {
+      if (panRafRef.current !== null) {
+        window.cancelAnimationFrame(panRafRef.current);
+      }
+    },
+    []
+  );
+
   // Pinch zoom (trackpad pinch = ctrl+wheel). Canvas zooms smoothly toward
   // the focal point; the other layouts step through zoomSteps once enough
   // delta accumulates. The zoom ref is updated eagerly so events that arrive
   // between a dispatch and the next render compound from the right value.
   const canvasZoomRef = useRef<number>(canvasZoom);
   canvasZoomRef.current = canvasZoom;
+  const canvasPanRef = useRef(canvasPan);
+  canvasPanRef.current = canvasPan;
+  // Mirrors canvasPan including not-yet-flushed rAF updates, so pinch math
+  // never reads a stale pan while a frame is pending.
+  const panShadowRef = useRef(canvasPan);
+  useEffect(() => {
+    panShadowRef.current = canvasPan;
+  }, [canvasPan]);
   const pinchAccRef = useRef<number>(0);
   const applyPinch = (rawDeltaY: number, focalX: number, focalY: number) => {
     const deltaY = Math.max(-PINCH_MAX_DELTA, Math.min(PINCH_MAX_DELTA, rawDeltaY));
@@ -155,10 +190,10 @@ const Previewer = () => {
       const localX = focalX - rect.left;
       const localY = focalY - rect.top;
       // Keep the world point under the cursor fixed while the scale changes.
-      setCanvasPan((pan) => ({
-        x: localX - ((localX - pan.x) / oldZoom) * newZoom,
-        y: localY - ((localY - pan.y) / oldZoom) * newZoom,
-      }));
+      requestPan({
+        x: localX - ((localX - panShadowRef.current.x) / oldZoom) * newZoom,
+        y: localY - ((localY - panShadowRef.current.y) / oldZoom) * newZoom,
+      });
       dispatch(setCanvasZoom(newZoom));
     } else {
       pinchAccRef.current += deltaY;
@@ -349,7 +384,7 @@ const Previewer = () => {
       });
       return;
     }
-    setCanvasPan({
+    requestPan({
       x: drag.base.x + (e.clientX - drag.startX),
       y: drag.base.y + (e.clientY - drag.startY),
     });
