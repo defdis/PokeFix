@@ -40,6 +40,7 @@ import log, {initCrashHandlers, initLogging} from './logging';
 import {injectHostIntoCsp} from './csp';
 import {isOpenableUrl} from './url-validation';
 import {runAgent, cancelAgent, killAgentOnQuit} from './agent-runner';
+import {initAgentTerminal, killAgentTerminal} from './agent-terminal';
 import {wireWebviewSecurity} from './webview-registry';
 import {getTitleBarOptions} from './titlebar';
 
@@ -116,6 +117,7 @@ initWebviewContextMenu();
 initScreenshotHandlers();
 initWebviewStorageManagerHandlers();
 initNativeFunctionHandlers();
+initAgentTerminal();
 initMcpServer(getMainWindow);
 initHttpBasicAuthHandlers(getMainWindow);
 const webPermissionHandlers = WebPermissionHandlers(getMainWindow);
@@ -469,7 +471,10 @@ app.on('certificate-error', (event, _, url, __, ___, callback) => {
   return callback(store.get('userPreferences.allowInsecureSSLConnections'));
 });
 
-app.on('will-quit', () => killAgentOnQuit());
+app.on('will-quit', () => {
+  killAgentOnQuit();
+  killAgentTerminal();
+});
 
 app
   .whenReady()

@@ -4825,6 +4825,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@xterm/addon-fit@npm:^0.11.0":
+  version: 0.11.0
+  resolution: "@xterm/addon-fit@npm:0.11.0"
+  checksum: 10c0/c0ce94f7e877d07e7197d15d041cc629ce2e853016400aadddc9810838ea8a26e836f87f325eba36df88c03feb72d9f13cd8c3bb41ee31e701f1058edb8553c3
+  languageName: node
+  linkType: hard
+
+"@xterm/xterm@npm:^6.0.0":
+  version: 6.0.0
+  resolution: "@xterm/xterm@npm:6.0.0"
+  checksum: 10c0/b99122553f323a65b708e5eba9903d4c5a1bcb59fe576d29d6e91a33002bccfd1b99403e1e839e1942f4952039db6d3d74ca9d65ed0399b4e9a0a5f35b8c12d9
+  languageName: node
+  linkType: hard
+
 "@xtuc/ieee754@npm:^1.2.0":
   version: 1.2.0
   resolution: "@xtuc/ieee754@npm:1.2.0"
@@ -11477,12 +11491,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-abi@npm:^4.2.0":
-  version: 4.26.0
-  resolution: "node-abi@npm:4.26.0"
+"node-abi@npm:^4.43.0":
+  version: 4.43.0
+  resolution: "node-abi@npm:4.43.0"
   dependencies:
     semver: "npm:^7.6.3"
-  checksum: 10c0/73a1c144b46cd3dafa9a92e068f756f0d6418c7136bc974b1da2eb43c218f468832661bfa499ed85e24c1eabde76ba09b1c4726e2830af709353f71af0c9ae32
+  checksum: 10c0/605330ad8d02e3deacd9a287070fe8922d5f860f1b81652d2baf66951a5bdf28bf9c3cbe18f61849ddbb4ca0cc709d3be1b9ec65d8279261a12767775b7f5832
   languageName: node
   linkType: hard
 
@@ -12124,6 +12138,8 @@ __metadata:
     "@types/react": "npm:^19.3.0"
     "@types/react-dom": "npm:^19.3.0"
     "@types/webpack-bundle-analyzer": "npm:^4.7.0"
+    "@xterm/addon-fit": "npm:^0.11.0"
+    "@xterm/xterm": "npm:^6.0.0"
     browser-sync: "npm:^3.0.4"
     classnames: "npm:^2.5.1"
     concurrently: "npm:^10.0.5"

@@ -67,6 +67,13 @@ export const IPC_MAIN_CHANNELS = {
   BA_AGENT_RUN: 'ba-agent-run',
   BA_AGENT_CANCEL: 'ba-agent-cancel',
   BA_PICK_DIRECTORY: 'ba-pick-directory',
+  TERMINAL_LIST_AGENTS: 'terminal-list-agents',
+  TERMINAL_OPEN: 'terminal-open',
+  TERMINAL_KILL: 'terminal-kill',
+  TERMINAL_WRITE: 'terminal-write',
+  TERMINAL_RESIZE: 'terminal-resize',
+  TERMINAL_DATA: 'terminal-data',
+  TERMINAL_EXIT: 'terminal-exit',
 } as const;
 
 export type Channels = (typeof IPC_MAIN_CHANNELS)[keyof typeof IPC_MAIN_CHANNELS];
