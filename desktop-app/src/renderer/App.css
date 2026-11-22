@@ -166,3 +166,25 @@ html {
 .app-no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Focus-mode device badge: text/icon swap slides+dims in on device switch. */
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes badge-in {
+    from,
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

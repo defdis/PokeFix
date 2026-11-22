@@ -30,7 +30,7 @@ import Device from './Device';
 import {framedSize} from './Device/frames';
 import {PREVIEW_PINCH_EVENT, type PinchDetail} from './pinch';
 import DevtoolsResizer from './DevtoolsResizer';
-import IndividualLayoutToolbar from './IndividualLayoutToolBar';
+import FocusDeviceBadge from './FocusDeviceBadge';
 
 interface CanvasPosition {
   x: number;
@@ -409,23 +409,23 @@ const Previewer = () => {
   };
 
   return (
-    <div className="h-full">
+    <div className="flex h-full flex-col">
       {isIndividualLayout && (
-        <IndividualLayoutToolbar
+        <FocusDeviceBadge
           individualDevice={individualDevice}
           setIndividualDevice={setIndividualDevice}
           devices={devices}
         />
       )}
       <div
-        className={cx('flex h-full', {
+        className={cx('flex min-h-0 flex-1', {
           'flex-col': dockPosition === DOCK_POSITION.BOTTOM,
           'flex-row': dockPosition === DOCK_POSITION.RIGHT,
           'justify-between': !isIndividualLayout,
           'justify-center': isIndividualLayout,
         })}
       >
-        <div className="flex grow overflow-hidden">
+        <div className="flex h-full min-h-0 min-w-0 grow overflow-hidden">
           <div
             ref={stageRef}
             data-testid={isCanvasLayout ? 'canvas-stage' : undefined}
