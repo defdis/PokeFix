@@ -14,7 +14,7 @@ import os from 'os';
 import fs from 'fs';
 import {randomUUID} from 'crypto';
 import {IPC_MAIN_CHANNELS} from '../common/constants';
-import {resolveExecutable} from './agent-runner';
+import {resolveExecutable} from './resolve-executable';
 import {
   parseAcpLine,
   mapSessionUpdate,

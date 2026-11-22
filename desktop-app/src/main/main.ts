@@ -39,7 +39,6 @@ import electronDebug from 'electron-debug';
 import log, {initCrashHandlers, initLogging} from './logging';
 import {injectHostIntoCsp} from './csp';
 import {isOpenableUrl} from './url-validation';
-import {runAgent, cancelAgent, killAgentOnQuit} from './agent-runner';
 import {initAgentChat, killAgentChat} from './acp-chat';
 import {wireWebviewSecurity} from './webview-registry';
 import {getTitleBarOptions} from './titlebar';
@@ -156,57 +155,15 @@ const agentEnv = (): AgentEnv => ({
 
 ipcMain.handle(IPC_MAIN_CHANNELS.MCP_LIST_TOOLS, async () => listAgentTools(agentEnv()));
 
-/**
- * AnnotatorBar "send to agent": spawn a user-configured agent CLI
- * (e.g. `hermes -z {prompt}`, `claude -p {prompt}`, `codex exec {prompt}`)
- * with the annotations as the prompt. Runs without any gateway; the prompt
- * travels as a single argv entry (no shell); output is returned to the bar.
- */
-ipcMain.handle(
-  IPC_MAIN_CHANNELS.BA_AGENT_RUN,
-  async (
-    _event,
-    request: {command: string; cwd?: string; prompt: string}
-  ): Promise<{
-    ok: boolean;
-    exitCode: number | null;
-    signal: NodeJS.Signals | null;
-    output: string;
-    stderrTail: string;
-    error?: string;
-    cancelled?: boolean;
-    durationMs: number;
-    truncated?: boolean;
-  }> => {
-    const command = typeof request?.command === 'string' ? request.command.trim() : '';
-    if (command.length === 0 || command.length > 1024) {
-      return {
-        ok: false,
-        exitCode: null,
-        signal: null,
-        output: '',
-        stderrTail: '',
-        error: 'Agent command is not set (see Annotator settings)',
-        durationMs: 0,
-      };
-    }
-    return runAgent({
-      command,
-      cwd: typeof request.cwd === 'string' ? request.cwd : undefined,
-      prompt: typeof request.prompt === 'string' ? request.prompt : '',
-    });
-  }
-);
-
-ipcMain.handle(IPC_MAIN_CHANNELS.BA_AGENT_CANCEL, async () => ({cancelled: cancelAgent()}));
-
+/** Folder picker for agent working directories (chat panel, annotator). */
 ipcMain.handle(IPC_MAIN_CHANNELS.BA_PICK_DIRECTORY, async () => {
-  const parent = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined;
-  const result = await dialog.showOpenDialog(parent as BrowserWindow, {
+  const result = await dialog.showOpenDialog({
     properties: ['openDirectory', 'createDirectory'],
-    title: 'Select the project folder the agent should work in',
   });
-  return result.canceled ? null : (result.filePaths[0] ?? null);
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
 });
 
 ipcMain.handle(
@@ -476,7 +433,6 @@ app.on('certificate-error', (event, _, url, __, ___, callback) => {
 });
 
 app.on('will-quit', () => {
-  killAgentOnQuit();
   killAgentChat();
 });
 

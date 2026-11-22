@@ -1,9 +1,9 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useDispatch, useSelector} from 'react-redux';
 
-import {IPC_MAIN_CHANNELS} from 'common/constants';
 import {setAnnotatorOpen, selectIsAnnotatorOpen} from 'renderer/store/features/annotator';
 import {webViewPubSub} from 'renderer/lib/pubsub';
+import {emitAgentChatSend} from 'renderer/lib/agentChatBus';
 
 interface BarConfig {
   cssClasses: boolean;
@@ -22,16 +22,6 @@ const DEFAULT_CONFIG: BarConfig = {
 };
 
 const CONFIG_STORAGE_KEY = 'baAnnotatorBarConfig';
-
-const AGENT_COMMAND_KEY = 'baAgentCommand';
-const AGENT_CWD_KEY = 'baAgentCwd';
-const DEFAULT_AGENT_COMMAND = 'hermes -z {prompt}';
-const AGENT_PRESETS: Array<{label: string; command: string}> = [
-  {label: 'Hermes', command: 'hermes -z {prompt}'},
-  {label: 'Claude Code', command: 'claude -p {prompt}'},
-  {label: 'Codex', command: 'codex exec {prompt}'},
-  {label: 'Gemini', command: 'gemini -p {prompt}'},
-];
 
 interface BarEntry {
   index: number;
@@ -79,6 +69,12 @@ const GLYPH_PATHS: Record<string, React.ReactNode> = {
   ),
   check: <path d="M4 12.5 9.5 18 20 6.5" />,
   pencil: <path d="M4 20l.9-3.6L16.2 5.1a2 2 0 0 1 2.8 0l-.1-.1a2 2 0 0 1 0 2.8L7.6 19.1 4 20Z" />,
+  undo: (
+    <>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </>
+  ),
   trash: (
     <>
       <path d="M3 6h18" />
@@ -154,24 +150,7 @@ const AnnotatorBar = () => {
   const [entries, setEntries] = useState<BarEntry[]>([]);
   const [editingIndex, setEditingIndex] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
-  const [agentStatus, setAgentStatus] = useState<'idle' | 'running' | 'ok' | 'fail'>('idle');
-  const sendStatusTimer = useRef<number | null>(null);
-  const agentTimer = useRef<number | null>(null);
-  const [agentElapsed, setAgentElapsed] = useState(0);
-  const [agentResult, setAgentResult] = useState<{
-    ok: boolean;
-    output: string;
-    error?: string;
-    durationMs: number;
-    cancelled?: boolean;
-    exitCode: number | null;
-    truncated?: boolean;
-  } | null>(null);
-  const [showAgentResult, setShowAgentResult] = useState(false);
-  const [agentCommand, setAgentCommand] = useState(
-    () => window.localStorage.getItem(AGENT_COMMAND_KEY) ?? DEFAULT_AGENT_COMMAND
-  );
-  const [agentCwd, setAgentCwd] = useState(() => window.localStorage.getItem(AGENT_CWD_KEY) ?? '');
+  const [canRestore, setCanRestore] = useState(false);
   const [showTour, setShowTour] = useState(
     () => window.localStorage.getItem('baAnnotatorOnboardingDismissed') == null
   );
@@ -226,25 +205,36 @@ const AnnotatorBar = () => {
       return undefined;
     }
     let disposed = false;
+    let canRestoreAny = false;
     const collect = async () => {
+      canRestoreAny = false;
       const collected = await Promise.all(
         listWebviews().map(async (webview, position) => {
           try {
             // One round trip per preview: re-arm the mode (the guest resets it
             // on reload), re-apply config/hidden (idempotent in the guest),
             // then read the marks.
-            const items: unknown = await webview.executeJavaScript(
+            const polled: unknown = await webview.executeJavaScript(
               `(() => {
                 if (window.baAnnotatorSetEnabled) { window.baAnnotatorSetEnabled(true); }
                 if (window.baAnnotationApi) {
                   window.baAnnotationApi.configure(${JSON.stringify(configRef.current)});
                   window.baAnnotationApi.setHidden(${hiddenRef.current ? 'true' : 'false'});
-                  return window.baAnnotationApi.get();
+                  return {
+                    items: window.baAnnotationApi.get(),
+                    canRestore:
+                      typeof window.baAnnotationApi.canRestore === 'function'
+                        ? window.baAnnotationApi.canRestore()
+                        : false,
+                  };
                 }
-                return [];
+                return {items: [], canRestore: false};
               })()`,
               false
             );
+            const pack = polled as {items?: unknown; canRestore?: boolean} | null;
+            const items: unknown = pack && Array.isArray(pack.items) ? pack.items : [];
+            canRestoreAny = canRestoreAny || Boolean(pack?.canRestore);
             if (!Array.isArray(items)) {
               return [];
             }
@@ -283,6 +273,7 @@ const AnnotatorBar = () => {
         setEntries((current) =>
           JSON.stringify(current) === JSON.stringify(flat) ? current : flat
         );
+        setCanRestore((prev) => (prev === canRestoreAny ? prev : canRestoreAny));
       }
     };
     const timer = setInterval(collect, 1500);
@@ -422,120 +413,17 @@ const AnnotatorBar = () => {
     ].join('\n');
   };
 
-  const runAgent = async () => {
-    if (entries.length === 0 || agentStatus === 'running') {
+  const sendToAgent = () => {
+    if (entries.length === 0) {
       return;
     }
-    setAgentStatus('running');
-    setAgentElapsed(0);
-    const startedAt = Date.now();
-    if (agentTimer.current !== null) {
-      window.clearInterval(agentTimer.current);
-    }
-    agentTimer.current = window.setInterval(
-      () => setAgentElapsed(Math.max(1, Math.floor((Date.now() - startedAt) / 1000))),
-      250
-    );
-    try {
-      const result = await window.electron.ipcRenderer.invoke<
-        {command: string; cwd?: string; prompt: string},
-        {
-          ok: boolean;
-          exitCode: number | null;
-          signal: string | null;
-          output: string;
-          stderrTail: string;
-          error?: string;
-          cancelled?: boolean;
-          durationMs: number;
-          truncated?: boolean;
-        }
-      >(IPC_MAIN_CHANNELS.BA_AGENT_RUN, {
-        command: agentCommand,
-        cwd: agentCwd.trim().length > 0 ? agentCwd.trim() : undefined,
-        prompt: buildAgentPrompt(),
-      });
-      const combined = result.output.trim();
-      setAgentResult({
-        ok: result.ok,
-        output: combined || result.stderrTail || '(no output)',
-        error: result.error,
-        durationMs: result.durationMs,
-        cancelled: result.cancelled,
-        exitCode: result.exitCode,
-        truncated: result.truncated,
-      });
-      setShowAgentResult(true);
-      setAgentStatus(result.ok ? 'ok' : 'fail');
-      if (result.ok && configRef.current.clearAfterSend) {
-        clearAll();
-      }
-    } catch (error) {
-      setAgentResult({
-        ok: false,
-        output: '',
-        error: String(error),
-        durationMs: Date.now() - startedAt,
-        exitCode: null,
-      });
-      setShowAgentResult(true);
-      setAgentStatus('fail');
-    } finally {
-      if (agentTimer.current !== null) {
-        window.clearInterval(agentTimer.current);
-        agentTimer.current = null;
-      }
-      if (sendStatusTimer.current !== null) {
-        window.clearTimeout(sendStatusTimer.current);
-      }
-      sendStatusTimer.current = window.setTimeout(() => setAgentStatus('idle'), 2500);
+    // The plane now hands the batch to the ACP chat panel (same warm agent,
+    // same project folder) instead of spawning a one-off CLI subprocess.
+    emitAgentChatSend(buildAgentPrompt());
+    if (configRef.current.clearAfterSend) {
+      clearAll();
     }
   };
-
-  const cancelAgent = () => {
-    window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.BA_AGENT_CANCEL).catch(() => undefined);
-  };
-
-  const pickProjectFolder = async () => {
-    try {
-      const picked = await window.electron.ipcRenderer.invoke<Record<string, never>, string | null>(
-        IPC_MAIN_CHANNELS.BA_PICK_DIRECTORY,
-        {}
-      );
-      if (picked) {
-        setAgentCwd(picked);
-        window.localStorage.setItem(AGENT_CWD_KEY, picked);
-      }
-    } catch {
-      // picker unavailable — user can still type the path
-    }
-  };
-
-  // Don't fire setState after unmount.
-  useEffect(
-    () => () => {
-      if (sendStatusTimer.current !== null) {
-        window.clearTimeout(sendStatusTimer.current);
-      }
-      if (agentTimer.current !== null) {
-        window.clearInterval(agentTimer.current);
-      }
-    },
-    []
-  );
-
-  useEffect(() => {
-    if (!showAgentResult) {
-      return undefined;
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setShowAgentResult(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [showAgentResult]);
 
   const copyMarkdown = async () => {
     const text = buildMarkdown();
@@ -638,43 +526,14 @@ const AnnotatorBar = () => {
           </button>
           <button
             type="button"
-            title={
-              agentStatus === 'running'
-                ? `Agent is working… ${agentElapsed}s (✕ to cancel)`
-                : agentStatus === 'fail'
-                  ? 'Agent run failed — see the result window'
-                  : 'Send annotations to the agent (runs the configured CLI)'
-            }
-            aria-label="Send annotations to the agent"
-            onClick={runAgent}
-            disabled={agentStatus === 'running' || entries.length === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/10 disabled:cursor-wait"
+            title="Отправить аннотации агенту в чат"
+            aria-label="Отправить аннотации агенту в чат"
+            onClick={sendToAgent}
+            disabled={entries.length === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/10 disabled:opacity-40"
           >
-            <BarGlyph
-              name={agentStatus === 'running' ? 'spinner' : 'send'}
-              fontSize={19}
-              className={
-                agentStatus === 'ok'
-                  ? 'text-emerald-400'
-                  : agentStatus === 'fail'
-                    ? 'text-red-400'
-                    : agentStatus === 'running'
-                      ? 'text-sky-300'
-                      : ''
-              }
-            />
+            <BarGlyph name="send" fontSize={19} />
           </button>
-          {agentStatus === 'running' && (
-            <button
-              type="button"
-              title="Cancel agent run"
-              aria-label="Cancel agent run"
-              onClick={cancelAgent}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white/10 hover:text-red-300"
-            >
-              <BarGlyph name="x" fontSize={16} />
-            </button>
-          )}
           <button
             type="button"
             title="Clear annotations"
@@ -684,6 +543,27 @@ const AnnotatorBar = () => {
           >
             <BarGlyph name="trash" fontSize={19} />
           </button>
+          {canRestore && (
+            <button
+              type="button"
+              title="Вернуть метки, забранные агентом"
+              aria-label="Вернуть метки, забранные агентом"
+              onClick={() => {
+                listWebviews().forEach((webview) => {
+                  webview
+                    .executeJavaScript(
+                      'window.baAnnotationApi && window.baAnnotationApi.restore && window.baAnnotationApi.restore()',
+                      false
+                    )
+                    .catch(() => undefined);
+                });
+                setCanRestore(false);
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-amber-300 hover:bg-white/10"
+            >
+              <BarGlyph name="undo" fontSize={18} />
+            </button>
+          )}
           <button
             type="button"
             title="Show annotation list"
@@ -763,7 +643,7 @@ const AnnotatorBar = () => {
             />
           </div>
           <div className="flex items-center justify-between py-1.5">
-            <span className="text-xs text-slate-200">Clear after agent run</span>
+            <span className="text-xs text-slate-200">Clear after sending to agent</span>
             <input
               type="checkbox"
               checked={config.clearAfterSend}
@@ -773,157 +653,11 @@ const AnnotatorBar = () => {
           <p className="mt-3 mb-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase">
             Agent
           </p>
-          <label className="mb-1 block text-[10px] text-slate-500" htmlFor="ba-agent-command">
-            Command
-          </label>
-          <input
-            id="ba-agent-command"
-            value={agentCommand}
-            onChange={(event) => {
-              setAgentCommand(event.target.value);
-              window.localStorage.setItem(AGENT_COMMAND_KEY, event.target.value);
-            }}
-            placeholder={DEFAULT_AGENT_COMMAND}
-            spellCheck={false}
-            className="w-full rounded-md border border-white/15 bg-[#0b1220]/80 px-2 py-1.5 font-mono text-[11px] text-slate-100"
-          />
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {AGENT_PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => {
-                  setAgentCommand(preset.command);
-                  window.localStorage.setItem(AGENT_COMMAND_KEY, preset.command);
-                }}
-                className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] text-slate-300 hover:border-emerald-400/50 hover:text-emerald-300"
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <label className="mt-2 mb-1 block text-[10px] text-slate-500" htmlFor="ba-agent-cwd">
-            Project folder
-          </label>
-          <div className="flex gap-1.5">
-            <input
-              id="ba-agent-cwd"
-              value={agentCwd}
-              onChange={(event) => {
-                setAgentCwd(event.target.value);
-                window.localStorage.setItem(AGENT_CWD_KEY, event.target.value);
-              }}
-              placeholder="~/path/to/project (default: home)"
-              spellCheck={false}
-              className="min-w-0 flex-1 rounded-md border border-white/15 bg-[#0b1220]/80 px-2 py-1.5 font-mono text-[11px] text-slate-100"
-            />
-            <button
-              type="button"
-              onClick={pickProjectFolder}
-              title="Choose folder…"
-              aria-label="Choose project folder"
-              className="flex w-8 shrink-0 items-center justify-center rounded-md border border-white/15 text-slate-300 hover:bg-white/5"
-            >
-              <BarGlyph name="folder" fontSize={15} />
-            </button>
-          </div>
-          <p className="mt-1.5 text-[10px] leading-snug text-slate-500">
-            The plane runs this CLI with the annotations as the prompt — no gateway or webhook
-            needed. <code className="text-slate-400">{'{prompt}'}</code> is replaced by the
-            annotation payload (appended at the end if omitted). Leave the folder empty to use your
-            home directory.
+          <p className="text-[10px] leading-snug text-slate-500">
+            Агент живёт в чате (кнопка справа внизу). Папка проекта выбирается там же; самолётик
+            отправляет метки в чат одним сообщением. Агент вычитывает их через MCP
+            (get_annotations), они не пишутся в промпт дважды.
           </p>
-        </div>
-      )}
-      {showAgentResult && agentResult && (
-        <div className="pointer-events-auto fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <button
-            type="button"
-            aria-label="Close agent response"
-            tabIndex={-1}
-            className="absolute inset-0 cursor-default bg-black/60"
-            onClick={() => setShowAgentResult(false)}
-          />
-          <div
-            className="relative flex max-h-[76vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-[#111a31] shadow-[0_20px_60px_rgba(0,0,0,0.6)] ring-1 ring-white/10"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Agent response"
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <span
-                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                    agentResult.ok
-                      ? 'bg-emerald-400'
-                      : agentResult.cancelled
-                        ? 'bg-amber-400'
-                        : 'bg-red-400'
-                  }`}
-                />
-                <p className="truncate text-sm font-semibold text-slate-100">
-                  {agentResult.ok
-                    ? 'Agent finished'
-                    : agentResult.cancelled
-                      ? 'Agent cancelled'
-                      : 'Agent failed'}
-                </p>
-                {agentResult.durationMs > 0 && (
-                  <span className="text-[10px] text-slate-500">
-                    {(agentResult.durationMs / 1000).toFixed(1)}s
-                  </span>
-                )}
-                {typeof agentResult.exitCode === 'number' && !agentResult.ok && (
-                  <span className="text-[10px] text-slate-500">exit {agentResult.exitCode}</span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAgentResult(false)}
-                aria-label="Close"
-                className="rounded-full p-1 text-slate-400 hover:bg-white/10 hover:text-slate-100"
-              >
-                <BarGlyph name="x" fontSize={15} />
-              </button>
-            </div>
-            <pre className="min-h-[120px] flex-1 overflow-auto px-4 py-3 font-sans text-[12px] leading-relaxed whitespace-pre-wrap text-slate-100">
-              {agentResult.output}
-            </pre>
-            {agentResult.error && (
-              <pre className="max-h-28 overflow-auto border-t border-red-500/20 bg-red-950/20 px-4 py-2 font-mono text-[11px] leading-snug whitespace-pre-wrap text-red-300">
-                {agentResult.error}
-              </pre>
-            )}
-            {agentResult.truncated && (
-              <p className="border-t border-white/5 px-4 py-1.5 text-[10px] text-amber-300/80">
-                Output was truncated — only the end is shown.
-              </p>
-            )}
-            <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  const text = agentResult.error
-                    ? `${agentResult.output}
-
---- error ---
-${agentResult.error}`
-                    : agentResult.output;
-                  navigator.clipboard.writeText(text).catch(() => undefined);
-                }}
-                className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/5"
-              >
-                Copy
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAgentResult(false)}
-                className="rounded-md bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
-              >
-                Close
-              </button>
-            </div>
-          </div>
         </div>
       )}
       {expanded && (

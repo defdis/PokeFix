@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Icon} from '@iconify/react';
 import cx from 'classnames';
 import {IPC_MAIN_CHANNELS} from 'common/constants';
+import {subscribeAgentChat} from '../../lib/agentChatBus';
 
 type ChatItem =
   | {id: string; kind: 'user'; text: string}
@@ -101,6 +102,7 @@ const AgentChat = () => {
   const [tokens, setTokens] = useState<number | null>(null);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [unread, setUnread] = useState(false);
+  const [pendingText, setPendingText] = useState<string | null>(null);
   const idRef = useRef(0);
   const nextId = () => `m-${(idRef.current += 1)}`;
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -162,6 +164,18 @@ const AgentChat = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // External surfaces (annotator plane button) push prompts into the chat here.
+  useEffect(
+    () =>
+      subscribeAgentChat((event) => {
+        if (event.type === 'send') {
+          setOpen(true);
+          setPendingText(event.text);
+        }
+      }),
+    []
+  );
 
   // Event plumbing.
   useEffect(() => {
@@ -285,11 +299,10 @@ const AgentChat = () => {
     if (open) setUnread(false);
   }, [open]);
 
-  const send = async () => {
-    const text = input.trim();
+  const sendText = async (rawText: string) => {
+    const text = rawText.trim();
     if (!text || running || status !== 'ready') return;
     setItems((prev) => [...prev, {id: nextId(), kind: 'user', text}]);
-    setInput('');
     setRunning(true);
     stickToBottom.current = true;
     try {
@@ -310,6 +323,27 @@ const AgentChat = () => {
     }
     setTimeout(() => scrollToBottom(true), 30);
   };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    await sendText(text);
+  };
+
+  // Flush a prompt pushed by the annotator plane once the session is up.
+  useEffect(() => {
+    if (pendingText === null) return;
+    if (status === 'ready') {
+      const text = pendingText;
+      setPendingText(null);
+      void sendText(text);
+    } else if (status === 'failed') {
+      setPendingText(null);
+      pushNote('Агент недоступен — сообщение не отправлено', 'error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingText, status]);
 
   const stop = () => {
     window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.AGENT_CHAT_CANCEL).catch(() => {
@@ -433,11 +467,22 @@ const AgentChat = () => {
             )}
             <button
               type="button"
-              onClick={newSession}
-              title="New session"
-              className="rounded p-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-200"
+              onClick={() => void sendText('/undo')}
+              disabled={running || status !== 'ready'}
+              title="Отменить последний шаг агента (/undo)"
+              aria-label="Отменить последний шаг агента"
+              className="rounded p-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-200 disabled:opacity-30"
             >
               <Icon icon="lucide:rotate-ccw" fontSize={13} />
+            </button>
+            <button
+              type="button"
+              onClick={newSession}
+              title="New session"
+              aria-label="New session"
+              className="rounded p-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-200"
+            >
+              <Icon icon="lucide:plus" fontSize={14} />
             </button>
             <button
               type="button"

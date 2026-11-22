@@ -196,6 +196,9 @@ interface BaAnnotationApi {
   active: () => boolean;
   get: () => BaAnnotationItem[];
   clear: () => void;
+  /** Re-insert the marks from the last clear (undo of an agent hand-off). Returns how many were restored. */
+  restore: () => number;
+  canRestore: () => boolean;
   remove: (index: number) => void;
   configure: (partial: Partial<BaAnnotatorConfig>) => void;
   setHidden: (hidden: boolean) => void;
@@ -213,6 +216,8 @@ interface BaAnnotationState {
   config: BaAnnotatorConfig;
   /** Marks hidden via the AnnotatorBar eye toggle (runtime, not persisted UI). */
   hidden: boolean;
+  /** Snapshot of the last clear, so a mis-sent batch can be restored. */
+  clearedItems: BaAnnotationItem[];
 }
 
 interface BaAnnotatorConfig {
@@ -243,12 +248,14 @@ const baReadState = (): BaAnnotationState => {
       items: [],
       config: {...DEFAULT_CONFIG},
       hidden: false,
+      clearedItems: [],
     };
     return {
       ...fallback,
       ...state,
       config: {...DEFAULT_CONFIG, ...(state.config ?? {})},
       hidden: state.active ? state.hidden : false,
+      clearedItems: Array.isArray(state.clearedItems) ? state.clearedItems : [],
     };
   };
   const existing = (window as unknown as Record<string, unknown>)[BA_WINDOW_KEY] as
@@ -268,7 +275,7 @@ const baReadState = (): BaAnnotationState => {
   } catch {
     // sessionStorage unavailable (sandboxed page) — memory-only mode.
   }
-  return {active: false, items: [], config: {...DEFAULT_CONFIG}, hidden: false};
+  return {active: false, items: [], config: {...DEFAULT_CONFIG}, hidden: false, clearedItems: []};
 };
 
 const baWriteState = (state: BaAnnotationState) => {
@@ -276,7 +283,7 @@ const baWriteState = (state: BaAnnotationState) => {
   try {
     window.sessionStorage.setItem(
       BA_WINDOW_KEY,
-      JSON.stringify({active: false, items: state.items})
+      JSON.stringify({active: false, items: state.items, clearedItems: state.clearedItems})
     );
   } catch {
     // Memory-only mode.
@@ -695,10 +702,29 @@ const baAnnotatorInit = () => {
     get: () => baReadState().items,
     clear: () => {
       const state = baReadState();
+      if (state.items.length > 0) {
+        // Keep a restorable snapshot: clear is usually the agent picking the
+        // batch up; a mis-sent batch must be undoable.
+        state.clearedItems = state.items.map((item) => ({...item}));
+      }
       state.items = [];
       baWriteState(state);
       baDrawMarks(state);
     },
+    restore: () => {
+      const state = baReadState();
+      const backup = state.clearedItems ?? [];
+      if (backup.length === 0) {
+        return 0;
+      }
+      const base = state.items.length;
+      state.items = [...state.items, ...backup.map((item, i) => ({...item, index: base + i + 1}))];
+      state.clearedItems = [];
+      baWriteState(state);
+      baDrawMarks(state);
+      return backup.length;
+    },
+    canRestore: () => (baReadState().clearedItems ?? []).length > 0,
     remove: (index: number) => {
       const state = baReadState();
       state.items = state.items.filter((item) => item.index !== index);

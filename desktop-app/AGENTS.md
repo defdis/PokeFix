@@ -24,6 +24,8 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 
 - `src/main/acp-chat.ts` + `src/common/acp.ts` — «Агент-чат»: ACP (Agent Client Protocol) по stdio к `hermes acp` / `opencode acp`; стриминг `session/update` (agent_message_chunk/tool_call/usage). ВАЖНО: hermes НИКОГДА не шлёт JSON-RPC ответ на `session/prompt` (проверено 2026-11-22 дважды) — завершение хода детектируется по trailing `usage_update` после контентных чанков (+ watchdog 4 мин), turn-complete идемпотентен
 - Permission-запросы от агента → inline-кнопки; cwd = `baAgentCwd` (общая с самолётиком); UI: `src/renderer/components/AgentChat/` (FAB + панель)
+- Самолётик (AnnotatorBar) = не отдельный runner, а «отправить в чат»: клик шлёт промпт через `renderer/lib/agentChatBus.ts` в открытый/ленивый ACP-чат (`sendText`); кнопки `/undo` (= `/undo` агента) и restore меток (`baAnnotationApi.restore()`, бэкап снимается на каждый clear, переживает reload через sessionStorage)
+- `get_annotations` = consume-on-read (см. выше); AnnotatorBar умеет вернуть метки кнопкой ↩ после ошибочной отправки
 - `src/main/mcp/` — MCP-сервер: `toolDefs.ts` (чистые zod-схемы, БЕЗ electron-импортов — шарятся с npm-пакетом), `tools.ts` (реализация), `bridge.ts` (IPC main→renderer), `index.ts` (HTTP на 12720), `agent-config.ts` (one-click конфиги 11 агентов; пишет `<userData>/mcp/cli.js` + `ELECTRON_RUN_AS_NODE=1`, не npm)
 - `src/renderer/components/McpBridge/` — исполняет MCP-команды в webviews
 - `src/main/screenshot/` — скриншоты кадров (использовать для аннотаций, не изобретать своё)
@@ -44,7 +46,7 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 
 - `will-attach-webview`: `nodeIntegration=false`, `contextIsolation=true` (пиннуть явно), preload только с базовым именем `preload-webview.js`
 - Renderer store bridge: `webPermissions` и `windowState` renderer'у НЕдоступны на запись (main-only); `userPreferences.allowInsecureSSLConnections` сознательно оставлен renderer-writable (есть UI-тогл)
-- Agent-run (самолётик): команда из настроек бара (`baAgentCommand`), spawn БЕЗ shell, `{prompt}` — единственный argv-токен; cwd = выбранная папка (`baAgentCwd`); kill только через ✕ (SIGTERM→SIGKILL) и при выходе из приложения; секретов нет и не требуется
+- agent-runner (`hermes -z` subprocess) удалён 2026-11-22: самолётик шлёт в ACP-чат; `resolveExecutable` живёт в `src/main/resolve-executable.ts` (поиск бинарника агента)
 - In-guest ответы страницы (текст, HTML, атрибуты) считать недоверенными везде, где рендерятся или экспортируются
 
 ## Verification
