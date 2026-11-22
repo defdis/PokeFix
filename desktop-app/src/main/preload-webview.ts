@@ -344,7 +344,7 @@ const baShowToggleBadge = (state: BaAnnotationState) => {
       'color:#ffd166;font:600 12px/1.4 -apple-system,"Segoe UI",Roboto,sans-serif;' +
       'padding:6px 12px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.45);' +
       'cursor:pointer;user-select:none;letter-spacing:.4px;';
-    badge.textContent = 'ANNOTATE ON — Alt+click';
+    baSyncBadgeText();
     badge.addEventListener('click', () => baToggleMode());
     document.documentElement.appendChild(badge);
   }
@@ -353,6 +353,11 @@ const baShowToggleBadge = (state: BaAnnotationState) => {
 const baToggleMode = () => {
   const state = baReadState();
   state.active = !state.active;
+  if (!state.active && baPickMode) {
+    baPickMode = false;
+    baHideHover();
+    ipcRenderer.sendToHost('ba-annotate-pick-mode', false);
+  }
   baWriteState(state);
   // Let the host bar mirror the in-guest toggle so it doesn't fight it.
   ipcRenderer.sendToHost('ba-annotate-toggled', state.active);
@@ -377,6 +382,11 @@ const baSetEnabled = (enabled: boolean): boolean => {
     return state.active;
   }
   state.active = enabled;
+  if (!enabled && baPickMode) {
+    baPickMode = false;
+    baHideHover();
+    ipcRenderer.sendToHost('ba-annotate-pick-mode', false);
+  }
   baWriteState(state);
   if (state.active) {
     baShowToggleBadge(state);
@@ -396,8 +406,9 @@ const baHidePopover = () => {
 };
 
 // ---------- DevTools-style hover highlight + picking signal ----------
-// While annotate mode is on and Alt is held, the element under the cursor is
-//outlined like a DevTools inspection; the host bar shows a picking hint.
+// While annotate mode is on (Alt held, or pick mode toggled from the host
+// bar), the element under the cursor is outlined like a DevTools inspection;
+// the host bar shows a picking hint.
 const baHoverElement = document.createElement('div');
 baHoverElement.id = 'ba-annotator-hover';
 baHoverElement.style.cssText =
@@ -405,6 +416,32 @@ baHoverElement.style.cssText =
   'background:rgba(79,140,255,.22);border:2px solid #4f8cff;pointer-events:none;';
 
 let baPicking = false;
+/**
+ * Toggleable "pick mode" driven by the host bar's crosshair button. When on,
+ * plain clicks mark elements (no need to hold Alt); Escape or the button
+ * turns it off. Alt-hold keeps working exactly as before.
+ */
+let baPickMode = false;
+const baSyncBadgeText = () => {
+  const badge = document.getElementById('ba-annotator-badge');
+  if (badge) {
+    badge.textContent = baPickMode ? 'ANNOTATE ON — click to mark' : 'ANNOTATE ON — Alt+click';
+  }
+};
+const baSetPickMode = (enabled: boolean) => {
+  const next = Boolean(enabled);
+  if (baPickMode === next) {
+    return;
+  }
+  baPickMode = next;
+  if (!baPickMode) {
+    baHideHover();
+  }
+  baSyncBadgeText();
+  // Tell the host bar so its button/hint stay in sync (Escape inside the
+  // guest, toggles from another webview, annotator off, …).
+  ipcRenderer.sendToHost('ba-annotate-pick-mode', baPickMode);
+};
 const baSetPicking = (picking: boolean) => {
   if (baPicking === picking) {
     return;
@@ -427,7 +464,7 @@ const baHideHover = () => {
 const baHoverMove = (event: MouseEvent) => {
   const state = baReadState();
   const target = event.target instanceof Element ? event.target : null;
-  if (!state.active || !baAltHeld(event) || !target || baIsOwnElement(target)) {
+  if (!state.active || (!baPickMode && !baAltHeld(event)) || !target || baIsOwnElement(target)) {
     baHideHover();
     baSetPicking(false);
     return;
@@ -722,10 +759,11 @@ const baAnnotateClick = (event: MouseEvent) => {
   if (target.closest('#ba-annotator-popover, #ba-annotator-badge')) {
     return;
   }
-  // Only Alt+click marks an element (user's explicit requirement): a plain
-  // click must keep its native page behavior (navigation, links) and just
-  // close a lingering popover.
-  if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+  // Alt+click marks an element; pick mode (host bar crosshair) makes every
+  // click mark instead. Outside those, a click keeps its native behavior.
+  const pickRequested =
+    baPickMode || (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey);
+  if (pickRequested) {
     event.preventDefault();
     event.stopPropagation();
     const nextIndex = state.items.length + 1;
@@ -814,6 +852,10 @@ const baAnnotatorInit = () => {
   contextBridge.exposeInMainWorld('baAnnotationApi', api);
   contextBridge.exposeInMainWorld('baAnnotatorSetEnabled', baSetEnabled);
   contextBridge.exposeInMainWorld('baAnnotatorToggle', baToggleMode);
+  contextBridge.exposeInMainWorld('baAnnotatorSetPickMode', baSetPickMode);
+  contextBridge.exposeInMainWorld('baAnnotatorGetPickMode', () => baPickMode);
+  // A fresh preload (page reload/navigation) resets pick mode — tell the host.
+  ipcRenderer.sendToHost('ba-annotate-pick-mode', baPickMode);
 
   window.addEventListener('click', (event) => baAnnotateClick(event as MouseEvent), true);
   // Preload runs at document_start, where documentElement is still null —
@@ -837,6 +879,9 @@ const baAnnotatorInit = () => {
       return;
     }
     if (event.key === 'Escape') {
+      if (baPickMode) {
+        baSetPickMode(false);
+      }
       baHidePopover();
     }
     if (event.key === 'Alt' && baReadState().active) {

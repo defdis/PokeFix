@@ -212,6 +212,9 @@ const Device = ({isPrimary, device, setIndividualDevice}: Props) => {
       if (e.channel === 'ba-annotate-picking') {
         webViewPubSub.publish('ba-annotate-picking', e.args[0] === true);
       }
+      if (e.channel === 'ba-annotate-pick-mode') {
+        webViewPubSub.publish('ba-annotate-pick-mode', e.args[0] === true);
+      }
       if (e.channel === 'ba-annotate-toggled') {
         webViewPubSub.publish('ba-annotate-toggled', e.args[0] === true);
       }

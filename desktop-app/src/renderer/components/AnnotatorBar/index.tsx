@@ -97,6 +97,13 @@ const GLYPH_PATHS: Record<string, React.ReactNode> = {
     </>
   ),
   x: <path d="M5 5l14 14M19 5L5 19" />,
+  crosshair: (
+    <>
+      <circle cx="12" cy="12" r="6.5" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+      <path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
+    </>
+  ),
   send: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />,
   spinner: (
     <g className="origin-center animate-spin">
@@ -147,6 +154,7 @@ const AnnotatorBar = () => {
   const [hidden, setHidden] = useState(false);
   const [copied, setCopied] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [pickMode, setPickMode] = useState(false);
   const [entries, setEntries] = useState<BarEntry[]>([]);
   const [editingIndex, setEditingIndex] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -304,16 +312,57 @@ const AnnotatorBar = () => {
   useEffect(() => {
     if (!isOpen) {
       setPicking(false);
+      setPickMode(false);
       return undefined;
     }
-    const handler = (pickingNow: boolean) => {
+    const pickingHandler = (pickingNow: boolean) => {
       setPicking(pickingNow);
     };
-    webViewPubSub.subscribe('ba-annotate-picking', handler);
+    const pickModeHandler = (mode: boolean) => {
+      setPickMode(mode === true);
+    };
+    webViewPubSub.subscribe('ba-annotate-picking', pickingHandler);
+    webViewPubSub.subscribe('ba-annotate-pick-mode', pickModeHandler);
     return () => {
-      webViewPubSub.unsubscribe('ba-annotate-picking', handler);
+      webViewPubSub.unsubscribe('ba-annotate-picking', pickingHandler);
+      webViewPubSub.unsubscribe('ba-annotate-pick-mode', pickModeHandler);
     };
   }, [isOpen]);
+
+  // Escape exits pick mode even when the host window has focus.
+  useEffect(() => {
+    if (!pickMode) {
+      return undefined;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPickMode(false);
+        listWebviews().forEach((webview) => {
+          webview
+            .executeJavaScript(
+              'window.baAnnotatorSetPickMode && window.baAnnotatorSetPickMode(false)',
+              false
+            )
+            .catch(() => undefined);
+        });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pickMode]);
+
+  const togglePickMode = () => {
+    const next = !pickMode;
+    setPickMode(next);
+    listWebviews().forEach((webview) => {
+      webview
+        .executeJavaScript(
+          `window.baAnnotatorSetPickMode && window.baAnnotatorSetPickMode(${next ? 'true' : 'false'})`,
+          false
+        )
+        .catch(() => undefined);
+    });
+  };
 
   useEffect(() => {
     // In-guest toggles (Cmd/Ctrl+Shift+. or the guest badge) → mirror into the
@@ -568,6 +617,15 @@ const AnnotatorBar = () => {
   };
 
   const turnOff = () => {
+    setPickMode(false);
+    listWebviews().forEach((webview) => {
+      webview
+        .executeJavaScript(
+          'window.baAnnotatorSetPickMode && window.baAnnotatorSetPickMode(false)',
+          false
+        )
+        .catch(() => undefined);
+    });
     listWebviews().forEach((webview) => {
       webview
         .executeJavaScript(
@@ -585,15 +643,18 @@ const AnnotatorBar = () => {
 
   return (
     <div className="pointer-events-none relative z-50 pt-1 pb-2">
-      {picking && (
+      {(picking || pickMode) && (
         <div className="pointer-events-none mx-auto mb-1.5 flex w-fit items-center gap-1.5 rounded-full bg-blue-500/95 px-3 py-1 text-[11px] font-semibold text-white shadow-lg">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-          Picking element — click to mark
+          {pickMode
+            ? 'Pick mode — click an element · Esc to exit'
+            : 'Picking element — click to mark'}
         </div>
       )}
       {showTour && (
         <div className="pointer-events-auto relative mx-auto mb-1.5 w-fit rounded-full bg-[#111a31]/95 px-4 py-1.5 text-[11px] text-slate-300 shadow-lg ring-1 ring-white/10">
-          Hold <kbd className="font-semibold text-white">Option</kbd> + click an element to mark it.
+          Click the <kbd className="font-semibold text-white">◎</kbd> pick button (or hold{' '}
+          <kbd className="font-semibold text-white">Option</kbd>), then click an element to mark it.
           Pokefix hands the list to your agent — configure it in{' '}
           <button
             type="button"
@@ -622,10 +683,25 @@ const AnnotatorBar = () => {
       )}
       <div
         className={`pointer-events-auto mx-auto w-fit max-w-[92%] rounded-full bg-[#111a31]/95 px-4 py-2 shadow-[0_8px_28px_rgba(0,0,0,0.55)] ${
-          picking ? 'ring-2 ring-blue-400/80' : 'ring-1 ring-white/10'
+          picking || pickMode ? 'ring-2 ring-blue-400/80' : 'ring-1 ring-white/10'
         }`}
       >
         <div className="flex items-center gap-3 text-slate-200">
+          <button
+            type="button"
+            title={pickMode ? 'Exit pick mode (Esc)' : 'Pick element to mark — no need to hold Alt'}
+            aria-label={pickMode ? 'Exit pick mode' : 'Pick element to mark'}
+            aria-pressed={pickMode}
+            onClick={togglePickMode}
+            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+              pickMode
+                ? 'bg-blue-500/25 text-blue-300 ring-1 ring-blue-400/70'
+                : 'text-slate-100 hover:bg-white/10'
+            }`}
+          >
+            <BarGlyph name="crosshair" fontSize={19} />
+          </button>
+          <span className="-mx-1.5 h-5 w-px bg-white/15" aria-hidden="true" />
           <button
             type="button"
             title={hidden ? 'Show annotations' : 'Hide annotations'}
