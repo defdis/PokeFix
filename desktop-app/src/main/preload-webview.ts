@@ -427,7 +427,7 @@ const baHoverLabel = document.createElement('div');
 baHoverLabel.id = 'ba-annotator-hover-label';
 baHoverLabel.style.cssText =
   'position:absolute;display:none;z-index:2147483646;pointer-events:none;' +
-  'background:rgba(17,17,22,.92);color:#e8e8ea;font:11px/1.5 -apple-system,system-ui,sans-serif;' +
+  'background:rgba(17,17,22,.92);color:#e8e8ea;font:12px/1.5 -apple-system,system-ui,sans-serif;letter-spacing:.01em;' +
   'padding:2px 7px;border-radius:4px;white-space:pre;box-shadow:0 1px 4px rgba(0,0,0,.4);';
 const baClipBand = (
   outer: {x: number; y: number; w: number; h: number},
@@ -441,12 +441,18 @@ const baPx = (value: string): number => {
   const n = parseFloat(value);
   return Number.isFinite(n) ? n : 0;
 };
+// CSS-shorthand compression with explicit units, e.g. "10px 20px".
 const baFmtBox = (values: number[]): string => {
   const rounded = values.map((v) => {
     const abs = Math.abs(v) < 0.5 ? 0 : Math.round(v * 10) / 10;
     return Number.isInteger(abs) ? String(abs) : abs.toFixed(1);
   });
-  return rounded.every((v) => v === rounded[0]) ? rounded[0] : rounded.join(' ');
+  const [t, r, b, l] = rounded;
+  const px = (v: string) => `${v}px`;
+  if (t === r && r === b && b === l) return px(t);
+  if (t === b && r === l) return `${px(t)} ${px(r)}`;
+  if (r === l) return `${px(t)} ${px(r)} ${px(b)}`;
+  return `${px(t)} ${px(r)} ${px(b)} ${px(l)}`;
 };
 
 let baPicking = false;
@@ -575,8 +581,12 @@ const baHoverMove = (event: MouseEvent) => {
     baHoverPadding.style.display = 'none';
   }
 
-  // Compact value chip: `m T R B L · p T R B L` (single value collapses).
-  baHoverLabel.textContent = `m ${baFmtBox([mt, mr, mb, ml])}  ·  p ${baFmtBox([pt, pr, pb, pl])}`;
+  // Value chip: colored swatches + words, CSS-shorthand values with units.
+  // All interpolated values are numbers we parsed — no page content.
+  baHoverLabel.innerHTML =
+    `<span style="color:#f6b26b">&#9632;</span> margin ${baFmtBox([mt, mr, mb, ml])}` +
+    `<span style="opacity:.45"> &nbsp;·&nbsp; </span>` +
+    `<span style="color:#93c47d">&#9632;</span> padding ${baFmtBox([pt, pr, pb, pl])}`;
   baHoverLabel.style.display = 'block';
   const labelTop = mTop - 26 >= window.scrollY + 4 ? mTop - 26 : rect.bottom + sy + 6;
   baHoverLabel.style.left = `${Math.max(mLeft, 4)}px`;
