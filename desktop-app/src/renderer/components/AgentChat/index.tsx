@@ -47,7 +47,11 @@ const renderInline = (text: string, keyPrefix: string) => {
 };
 
 const renderRichText = (text: string) => {
-  const segments = text.split(/```/g);
+  // The ACP stream accumulates raw chunks, so message text routinely opens
+  // with the newlines that separated it from the previous tool call. Blank
+  // lines at the top of the bubble read as a mystery gap — trim them.
+  const normalized = text.replace(/^\s+/, '').replace(/\n{3,}/g, '\n\n');
+  const segments = normalized.split(/```/g);
   return segments.map((segment, index) => {
     if (index % 2 === 1) {
       const firstNewline = segment.indexOf('\n');
@@ -60,6 +64,9 @@ const renderRichText = (text: string) => {
           {body}
         </pre>
       );
+    }
+    if (segment.trim() === '') {
+      return null;
     }
     return (
       <p key={`text-${index}`} className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
