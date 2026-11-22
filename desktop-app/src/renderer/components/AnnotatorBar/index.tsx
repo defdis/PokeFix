@@ -10,6 +10,7 @@ interface BarConfig {
   fullText: boolean;
   computedStyles: boolean;
   clearAfterCopy: boolean;
+  clearAfterSend: boolean;
 }
 
 const DEFAULT_CONFIG: BarConfig = {
@@ -17,13 +18,20 @@ const DEFAULT_CONFIG: BarConfig = {
   fullText: true,
   computedStyles: false,
   clearAfterCopy: false,
+  clearAfterSend: true,
 };
 
 const CONFIG_STORAGE_KEY = 'baAnnotatorBarConfig';
 
-const WEBHOOK_URL_KEY = 'baAnnotatorWebhookUrl';
-const WEBHOOK_SECRET_KEY = 'baAnnotatorWebhookSecret';
-const DEFAULT_WEBHOOK_URL = 'http://127.0.0.1:8644/webhooks/responsively';
+const AGENT_COMMAND_KEY = 'baAgentCommand';
+const AGENT_CWD_KEY = 'baAgentCwd';
+const DEFAULT_AGENT_COMMAND = 'hermes -z {prompt}';
+const AGENT_PRESETS: Array<{label: string; command: string}> = [
+  {label: 'Hermes', command: 'hermes -z {prompt}'},
+  {label: 'Claude Code', command: 'claude -p {prompt}'},
+  {label: 'Codex', command: 'codex exec {prompt}'},
+  {label: 'Gemini', command: 'gemini -p {prompt}'},
+];
 
 interface BarEntry {
   index: number;
@@ -94,6 +102,17 @@ const GLYPH_PATHS: Record<string, React.ReactNode> = {
   ),
   x: <path d="M5 5l14 14M19 5L5 19" />,
   send: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />,
+  spinner: (
+    <g className="origin-center animate-spin">
+      <circle cx="12" cy="12" r="9" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" />
+    </g>
+  ),
+  folder: (
+    <>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </>
+  ),
 };
 
 const BarGlyph = ({
@@ -135,14 +154,24 @@ const AnnotatorBar = () => {
   const [entries, setEntries] = useState<BarEntry[]>([]);
   const [editingIndex, setEditingIndex] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
-  const [sendStatus, setSendStatus] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle');
+  const [agentStatus, setAgentStatus] = useState<'idle' | 'running' | 'ok' | 'fail'>('idle');
   const sendStatusTimer = useRef<number | null>(null);
-  const [webhookUrl, setWebhookUrl] = useState(
-    () => window.localStorage.getItem(WEBHOOK_URL_KEY) ?? DEFAULT_WEBHOOK_URL
+  const agentTimer = useRef<number | null>(null);
+  const [agentElapsed, setAgentElapsed] = useState(0);
+  const [agentResult, setAgentResult] = useState<{
+    ok: boolean;
+    output: string;
+    error?: string;
+    durationMs: number;
+    cancelled?: boolean;
+    exitCode: number | null;
+    truncated?: boolean;
+  } | null>(null);
+  const [showAgentResult, setShowAgentResult] = useState(false);
+  const [agentCommand, setAgentCommand] = useState(
+    () => window.localStorage.getItem(AGENT_COMMAND_KEY) ?? DEFAULT_AGENT_COMMAND
   );
-  const [webhookSecret, setWebhookSecret] = useState(
-    () => window.localStorage.getItem(WEBHOOK_SECRET_KEY) ?? ''
-  );
+  const [agentCwd, setAgentCwd] = useState(() => window.localStorage.getItem(AGENT_CWD_KEY) ?? '');
   const [showTour, setShowTour] = useState(
     () => window.localStorage.getItem('baAnnotatorOnboardingDismissed') == null
   );
@@ -374,43 +403,112 @@ const AnnotatorBar = () => {
     return lines.join('\n');
   };
 
-  const sendToAgent = async () => {
-    if (entries.length === 0) {
+  const buildAgentPrompt = () => {
+    const items = entries.map(
+      ({webviewId: _webviewId, device: _device, viewport: _viewport, ...rest}) => rest
+    );
+    return [
+      'You are an agent fixing UI issues found in a responsive preview (Pokefix).',
+      'Apply the fixes in the current repository (markup/styles/logic), then reply briefly:',
+      'what you changed and what you could not verify. Work autonomously with the tools you have.',
+      '',
+      '## Annotations (markdown)',
+      buildMarkdown(),
+      '',
+      '## Items (JSON)',
+      '```json',
+      JSON.stringify(items, null, 2),
+      '```',
+    ].join('\n');
+  };
+
+  const runAgent = async () => {
+    if (entries.length === 0 || agentStatus === 'running') {
       return;
     }
-    setSendStatus('sending');
-    const storedSecret = window.localStorage.getItem(WEBHOOK_SECRET_KEY) ?? '';
-    const payload = JSON.stringify({
-      event_type: 'annotations',
-      message:
-        'User sent UI annotations from Pokefix — fetch payload.markdown and payload.items, then handle the feedback.',
-      markdown: buildMarkdown(),
-      items: entries.map(
-        ({webviewId: _webviewId, device: _device, viewport: _viewport, ...rest}) => rest
-      ),
-    });
+    setAgentStatus('running');
+    setAgentElapsed(0);
+    const startedAt = Date.now();
+    if (agentTimer.current !== null) {
+      window.clearInterval(agentTimer.current);
+    }
+    agentTimer.current = window.setInterval(
+      () => setAgentElapsed(Math.max(1, Math.floor((Date.now() - startedAt) / 1000))),
+      250
+    );
     try {
-      // POST via the main process: the renderer's browser fetch is CORS-bound
-      // and the webhook gateway answers preflights with 405.
       const result = await window.electron.ipcRenderer.invoke<
-        {url: string; secret: string; body: string},
-        {ok: boolean; status: number | null; error?: string}
-      >(IPC_MAIN_CHANNELS.BA_SEND_TO_AGENT, {
-        url: window.localStorage.getItem(WEBHOOK_URL_KEY) ?? DEFAULT_WEBHOOK_URL,
-        secret: storedSecret,
-        body: payload,
+        {command: string; cwd?: string; prompt: string},
+        {
+          ok: boolean;
+          exitCode: number | null;
+          signal: string | null;
+          output: string;
+          stderrTail: string;
+          error?: string;
+          cancelled?: boolean;
+          durationMs: number;
+          truncated?: boolean;
+        }
+      >(IPC_MAIN_CHANNELS.BA_AGENT_RUN, {
+        command: agentCommand,
+        cwd: agentCwd.trim().length > 0 ? agentCwd.trim() : undefined,
+        prompt: buildAgentPrompt(),
       });
-      setSendStatus(result.ok ? 'ok' : 'fail');
-      if (result.ok && config.clearAfterCopy) {
+      const combined = result.output.trim();
+      setAgentResult({
+        ok: result.ok,
+        output: combined || result.stderrTail || '(no output)',
+        error: result.error,
+        durationMs: result.durationMs,
+        cancelled: result.cancelled,
+        exitCode: result.exitCode,
+        truncated: result.truncated,
+      });
+      setShowAgentResult(true);
+      setAgentStatus(result.ok ? 'ok' : 'fail');
+      if (result.ok && configRef.current.clearAfterSend) {
         clearAll();
       }
     } catch (error) {
-      setSendStatus('fail');
+      setAgentResult({
+        ok: false,
+        output: '',
+        error: String(error),
+        durationMs: Date.now() - startedAt,
+        exitCode: null,
+      });
+      setShowAgentResult(true);
+      setAgentStatus('fail');
+    } finally {
+      if (agentTimer.current !== null) {
+        window.clearInterval(agentTimer.current);
+        agentTimer.current = null;
+      }
+      if (sendStatusTimer.current !== null) {
+        window.clearTimeout(sendStatusTimer.current);
+      }
+      sendStatusTimer.current = window.setTimeout(() => setAgentStatus('idle'), 2500);
     }
-    if (sendStatusTimer.current !== null) {
-      window.clearTimeout(sendStatusTimer.current);
+  };
+
+  const cancelAgent = () => {
+    window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.BA_AGENT_CANCEL).catch(() => undefined);
+  };
+
+  const pickProjectFolder = async () => {
+    try {
+      const picked = await window.electron.ipcRenderer.invoke<Record<string, never>, string | null>(
+        IPC_MAIN_CHANNELS.BA_PICK_DIRECTORY,
+        {}
+      );
+      if (picked) {
+        setAgentCwd(picked);
+        window.localStorage.setItem(AGENT_CWD_KEY, picked);
+      }
+    } catch {
+      // picker unavailable — user can still type the path
     }
-    sendStatusTimer.current = window.setTimeout(() => setSendStatus('idle'), 2500);
   };
 
   // Don't fire setState after unmount.
@@ -419,9 +517,25 @@ const AnnotatorBar = () => {
       if (sendStatusTimer.current !== null) {
         window.clearTimeout(sendStatusTimer.current);
       }
+      if (agentTimer.current !== null) {
+        window.clearInterval(agentTimer.current);
+      }
     },
     []
   );
+
+  useEffect(() => {
+    if (!showAgentResult) {
+      return undefined;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowAgentResult(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showAgentResult]);
 
   const copyMarkdown = async () => {
     const text = buildMarkdown();
@@ -525,30 +639,42 @@ const AnnotatorBar = () => {
           <button
             type="button"
             title={
-              webhookSecret.length === 0
-                ? 'Send to agent — not configured: set the webhook in settings'
-                : sendStatus === 'fail'
-                  ? 'Send to agent — failed, check the Hermes gateway'
-                  : 'Send annotations to the agent'
+              agentStatus === 'running'
+                ? `Agent is working… ${agentElapsed}s (✕ to cancel)`
+                : agentStatus === 'fail'
+                  ? 'Agent run failed — see the result window'
+                  : 'Send annotations to the agent (runs the configured CLI)'
             }
             aria-label="Send annotations to the agent"
-            onClick={sendToAgent}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/10"
+            onClick={runAgent}
+            disabled={agentStatus === 'running' || entries.length === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/10 disabled:cursor-wait"
           >
             <BarGlyph
-              name="send"
+              name={agentStatus === 'running' ? 'spinner' : 'send'}
               fontSize={19}
               className={
-                sendStatus === 'ok'
+                agentStatus === 'ok'
                   ? 'text-emerald-400'
-                  : sendStatus === 'fail'
+                  : agentStatus === 'fail'
                     ? 'text-red-400'
-                    : sendStatus === 'sending'
-                      ? 'opacity-50'
+                    : agentStatus === 'running'
+                      ? 'text-sky-300'
                       : ''
               }
             />
           </button>
+          {agentStatus === 'running' && (
+            <button
+              type="button"
+              title="Cancel agent run"
+              aria-label="Cancel agent run"
+              onClick={cancelAgent}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white/10 hover:text-red-300"
+            >
+              <BarGlyph name="x" fontSize={16} />
+            </button>
+          )}
           <button
             type="button"
             title="Clear annotations"
@@ -629,41 +755,175 @@ const AnnotatorBar = () => {
             Behavior
           </p>
           <div className="flex items-center justify-between py-1.5">
-            <span className="text-xs text-slate-200">Clear after send/copy</span>
+            <span className="text-xs text-slate-200">Clear after copy</span>
             <input
               type="checkbox"
               checked={config.clearAfterCopy}
               onChange={(event) => updateConfig({clearAfterCopy: event.target.checked})}
             />
           </div>
+          <div className="flex items-center justify-between py-1.5">
+            <span className="text-xs text-slate-200">Clear after agent run</span>
+            <input
+              type="checkbox"
+              checked={config.clearAfterSend}
+              onChange={(event) => updateConfig({clearAfterSend: event.target.checked})}
+            />
+          </div>
           <p className="mt-3 mb-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase">
-            Agent webhook
+            Agent
           </p>
+          <label className="mb-1 block text-[10px] text-slate-500" htmlFor="ba-agent-command">
+            Command
+          </label>
           <input
-            value={webhookUrl}
+            id="ba-agent-command"
+            value={agentCommand}
             onChange={(event) => {
-              setWebhookUrl(event.target.value);
-              window.localStorage.setItem(WEBHOOK_URL_KEY, event.target.value);
+              setAgentCommand(event.target.value);
+              window.localStorage.setItem(AGENT_COMMAND_KEY, event.target.value);
             }}
-            placeholder={DEFAULT_WEBHOOK_URL}
-            className="w-full rounded-md border border-white/15 bg-[#0b1220]/80 px-2 py-1.5 text-xs text-slate-100"
+            placeholder={DEFAULT_AGENT_COMMAND}
+            spellCheck={false}
+            className="w-full rounded-md border border-white/15 bg-[#0b1220]/80 px-2 py-1.5 font-mono text-[11px] text-slate-100"
           />
-          <input
-            value={webhookSecret}
-            onChange={(event) => {
-              setWebhookSecret(event.target.value);
-              window.localStorage.setItem(WEBHOOK_SECRET_KEY, event.target.value);
-            }}
-            placeholder="Webhook HMAC secret"
-            type="password"
-            className="mt-2 w-full rounded-md border border-white/15 bg-[#0b1220]/80 px-2 py-1.5 text-xs text-slate-100"
-          />
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {AGENT_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  setAgentCommand(preset.command);
+                  window.localStorage.setItem(AGENT_COMMAND_KEY, preset.command);
+                }}
+                className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] text-slate-300 hover:border-emerald-400/50 hover:text-emerald-300"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <label className="mt-2 mb-1 block text-[10px] text-slate-500" htmlFor="ba-agent-cwd">
+            Project folder
+          </label>
+          <div className="flex gap-1.5">
+            <input
+              id="ba-agent-cwd"
+              value={agentCwd}
+              onChange={(event) => {
+                setAgentCwd(event.target.value);
+                window.localStorage.setItem(AGENT_CWD_KEY, event.target.value);
+              }}
+              placeholder="~/path/to/project (default: home)"
+              spellCheck={false}
+              className="min-w-0 flex-1 rounded-md border border-white/15 bg-[#0b1220]/80 px-2 py-1.5 font-mono text-[11px] text-slate-100"
+            />
+            <button
+              type="button"
+              onClick={pickProjectFolder}
+              title="Choose folder…"
+              aria-label="Choose project folder"
+              className="flex w-8 shrink-0 items-center justify-center rounded-md border border-white/15 text-slate-300 hover:bg-white/5"
+            >
+              <BarGlyph name="folder" fontSize={15} />
+            </button>
+          </div>
           <p className="mt-1.5 text-[10px] leading-snug text-slate-500">
-            Requires the local Hermes gateway webhook (127.0.0.1:8644). Leave the secret empty for
-            the no-auth loopback route (<span className="text-slate-400">INSECURE_NO_AUTH</span>) —
-            nothing to generate. A secret is only needed if your route signs requests. Without the
-            gateway enabled, only copy works.
+            The plane runs this CLI with the annotations as the prompt — no gateway or webhook
+            needed. <code className="text-slate-400">{'{prompt}'}</code> is replaced by the
+            annotation payload (appended at the end if omitted). Leave the folder empty to use your
+            home directory.
           </p>
+        </div>
+      )}
+      {showAgentResult && agentResult && (
+        <div className="pointer-events-auto fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close agent response"
+            tabIndex={-1}
+            className="absolute inset-0 cursor-default bg-black/60"
+            onClick={() => setShowAgentResult(false)}
+          />
+          <div
+            className="relative flex max-h-[76vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-[#111a31] shadow-[0_20px_60px_rgba(0,0,0,0.6)] ring-1 ring-white/10"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Agent response"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2.5">
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                    agentResult.ok
+                      ? 'bg-emerald-400'
+                      : agentResult.cancelled
+                        ? 'bg-amber-400'
+                        : 'bg-red-400'
+                  }`}
+                />
+                <p className="truncate text-sm font-semibold text-slate-100">
+                  {agentResult.ok
+                    ? 'Agent finished'
+                    : agentResult.cancelled
+                      ? 'Agent cancelled'
+                      : 'Agent failed'}
+                </p>
+                {agentResult.durationMs > 0 && (
+                  <span className="text-[10px] text-slate-500">
+                    {(agentResult.durationMs / 1000).toFixed(1)}s
+                  </span>
+                )}
+                {typeof agentResult.exitCode === 'number' && !agentResult.ok && (
+                  <span className="text-[10px] text-slate-500">exit {agentResult.exitCode}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAgentResult(false)}
+                aria-label="Close"
+                className="rounded-full p-1 text-slate-400 hover:bg-white/10 hover:text-slate-100"
+              >
+                <BarGlyph name="x" fontSize={15} />
+              </button>
+            </div>
+            <pre className="min-h-[120px] flex-1 overflow-auto px-4 py-3 font-sans text-[12px] leading-relaxed whitespace-pre-wrap text-slate-100">
+              {agentResult.output}
+            </pre>
+            {agentResult.error && (
+              <pre className="max-h-28 overflow-auto border-t border-red-500/20 bg-red-950/20 px-4 py-2 font-mono text-[11px] leading-snug whitespace-pre-wrap text-red-300">
+                {agentResult.error}
+              </pre>
+            )}
+            {agentResult.truncated && (
+              <p className="border-t border-white/5 px-4 py-1.5 text-[10px] text-amber-300/80">
+                Output was truncated — only the end is shown.
+              </p>
+            )}
+            <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const text = agentResult.error
+                    ? `${agentResult.output}
+
+--- error ---
+${agentResult.error}`
+                    : agentResult.output;
+                  navigator.clipboard.writeText(text).catch(() => undefined);
+                }}
+                className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/5"
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAgentResult(false)}
+                className="rounded-md bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {expanded && (

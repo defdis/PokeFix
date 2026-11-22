@@ -9,8 +9,7 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import crypto from 'crypto';
-import {app, BrowserWindow, session, shell, ipcMain, net} from 'electron';
+import {app, BrowserWindow, session, shell, ipcMain, dialog} from 'electron';
 import cli from './cli';
 import {IPC_MAIN_CHANNELS, PROTOCOL} from '../common/constants';
 import MenuBuilder from './menu';
@@ -40,6 +39,7 @@ import electronDebug from 'electron-debug';
 import log, {initCrashHandlers, initLogging} from './logging';
 import {injectHostIntoCsp} from './csp';
 import {isOpenableUrl} from './url-validation';
+import {runAgent, cancelAgent, killAgentOnQuit} from './agent-runner';
 import {wireWebviewSecurity} from './webview-registry';
 import {getTitleBarOptions} from './titlebar';
 
@@ -153,65 +153,57 @@ const agentEnv = (): AgentEnv => ({
 ipcMain.handle(IPC_MAIN_CHANNELS.MCP_LIST_TOOLS, async () => listAgentTools(agentEnv()));
 
 /**
- * AnnotatorBar "send to agent": POST made from the main process because the
- * renderer's browser fetch is subject to CORS — the Hermes webhook gateway
- * answers OPTIONS preflights with 405, which poisoned the send button red.
+ * AnnotatorBar "send to agent": spawn a user-configured agent CLI
+ * (e.g. `hermes -z {prompt}`, `claude -p {prompt}`, `codex exec {prompt}`)
+ * with the annotations as the prompt. Runs without any gateway; the prompt
+ * travels as a single argv entry (no shell); output is returned to the bar.
  */
 ipcMain.handle(
-  IPC_MAIN_CHANNELS.BA_SEND_TO_AGENT,
+  IPC_MAIN_CHANNELS.BA_AGENT_RUN,
   async (
     _event,
-    {url, secret, body}: {url: string; secret: string; body: string}
-  ): Promise<{ok: boolean; status: number | null; error?: string}> => {
-    // The renderer picks the URL — never POST it anywhere but the loopback
-    // webhook, and never sign arbitrary bodies for arbitrary hosts.
-    const MAX_BODY_BYTES = 256 * 1024;
-    const MAX_SECRET_LENGTH = 512;
-    let target: URL;
-    try {
-      target = new URL(url);
-    } catch {
-      return {ok: false, status: null, error: 'Invalid webhook URL'};
+    request: {command: string; cwd?: string; prompt: string}
+  ): Promise<{
+    ok: boolean;
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    output: string;
+    stderrTail: string;
+    error?: string;
+    cancelled?: boolean;
+    durationMs: number;
+    truncated?: boolean;
+  }> => {
+    const command = typeof request?.command === 'string' ? request.command.trim() : '';
+    if (command.length === 0 || command.length > 1024) {
+      return {
+        ok: false,
+        exitCode: null,
+        signal: null,
+        output: '',
+        stderrTail: '',
+        error: 'Agent command is not set (see Annotator settings)',
+        durationMs: 0,
+      };
     }
-    const isLoopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(target.hostname);
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-      return {ok: false, status: null, error: 'Only http(s) webhook URLs are allowed'};
-    }
-    if (!isLoopback) {
-      return {ok: false, status: null, error: 'Webhook URL must point at localhost'};
-    }
-    if (typeof body !== 'string' || body.length > MAX_BODY_BYTES) {
-      return {ok: false, status: null, error: 'Payload too large'};
-    }
-    if (typeof secret !== 'string' || secret.length > MAX_SECRET_LENGTH) {
-      return {ok: false, status: null, error: 'Invalid secret'};
-    }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'X-GitHub-Event': 'annotations',
-    };
-    if (secret.length > 0) {
-      const signature = crypto.createHmac('sha256', secret).update(body).digest('hex');
-      headers['X-Hub-Signature-256'] = `sha256=${signature}`;
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    try {
-      const response = await net.fetch(target.toString(), {
-        method: 'POST',
-        headers,
-        body,
-        signal: controller.signal,
-      });
-      return {ok: response.ok, status: response.status};
-    } catch (sendError) {
-      log.error('[send-to-agent] failed', sendError);
-      return {ok: false, status: null, error: String(sendError)};
-    } finally {
-      clearTimeout(timeout);
-    }
+    return runAgent({
+      command,
+      cwd: typeof request.cwd === 'string' ? request.cwd : undefined,
+      prompt: typeof request.prompt === 'string' ? request.prompt : '',
+    });
   }
 );
+
+ipcMain.handle(IPC_MAIN_CHANNELS.BA_AGENT_CANCEL, async () => ({cancelled: cancelAgent()}));
+
+ipcMain.handle(IPC_MAIN_CHANNELS.BA_PICK_DIRECTORY, async () => {
+  const parent = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined;
+  const result = await dialog.showOpenDialog(parent as BrowserWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Select the project folder the agent should work in',
+  });
+  return result.canceled ? null : (result.filePaths[0] ?? null);
+});
 
 ipcMain.handle(
   IPC_MAIN_CHANNELS.MCP_SET_TOOL,
@@ -474,6 +466,8 @@ app.on('certificate-error', (event, _, url, __, ___, callback) => {
   log.info('certificate-error event', url, getBrowserSyncHost());
   return callback(store.get('userPreferences.allowInsecureSSLConnections'));
 });
+
+app.on('will-quit', () => killAgentOnQuit());
 
 app
   .whenReady()

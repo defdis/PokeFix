@@ -64,7 +64,9 @@ export const IPC_MAIN_CHANNELS = {
   MCP_SET_ENABLED: 'mcp-set-enabled',
   MCP_LIST_TOOLS: 'mcp-list-tools',
   MCP_SET_TOOL: 'mcp-set-tool',
-  BA_SEND_TO_AGENT: 'ba-send-to-agent',
+  BA_AGENT_RUN: 'ba-agent-run',
+  BA_AGENT_CANCEL: 'ba-agent-cancel',
+  BA_PICK_DIRECTORY: 'ba-pick-directory',
 } as const;
 
 export type Channels = (typeof IPC_MAIN_CHANNELS)[keyof typeof IPC_MAIN_CHANNELS];
