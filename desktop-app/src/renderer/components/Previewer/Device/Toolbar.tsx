@@ -135,6 +135,9 @@ const Toolbar = ({
   const dispatch = useDispatch();
   const [eventMirroringOff, setEventMirroringOff] = useState<boolean>(false);
   const overlayFileInputRef = useRef<HTMLInputElement>(null);
+  // Narrow frames (scaled phone widths) can't fit the full action row;
+  // secondary actions move into the overflow menu instead of wrapping.
+  const compact = previewWidth < 300;
 
   const onOverlayFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -211,12 +214,11 @@ const Toolbar = ({
       data-testid="device-pill"
       className={cx(
         // Unselected canvas tools must not intercept neighbouring previews.
-        'z-30 flex items-center gap-[2px] rounded-[9px] border border-line bg-panel p-[3px] shadow-elevated',
+        'z-30 flex w-max items-center gap-[2px] rounded-[9px] border border-line bg-panel p-[3px] shadow-elevated',
         variant === 'grid'
-          ? 'relative mb-2 w-max flex-wrap'
+          ? 'relative mb-2 max-w-full'
           : 'pointer-events-none absolute top-full left-1/2 mt-[10px] -translate-x-1/2 opacity-0 transition-opacity duration-150 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
       )}
-      style={variant === 'grid' ? {maxWidth: previewWidth} : undefined}
     >
       <PillButton title="Refresh this device" onClick={refreshView}>
         <Icon icon="ic:round-refresh" />
@@ -239,9 +241,11 @@ const Toolbar = ({
       <PillButton title="Open devtools" onClick={openDevTools}>
         <Icon icon="ic:round-code" />
       </PillButton>
-      <PillButton title="Scroll to top" onClick={scrollToTop}>
-        <Icon icon="ic:baseline-arrow-upward" />
-      </PillButton>
+      {!compact && (
+        <PillButton title="Scroll to top" onClick={scrollToTop}>
+          <Icon icon="ic:baseline-arrow-upward" />
+        </PillButton>
+      )}
       <PillButton
         title="Focus this device"
         isActive={isIndividualLayout}
@@ -249,9 +253,11 @@ const Toolbar = ({
       >
         <Icon icon="ic:round-fullscreen" />
       </PillButton>
-      <PillButton title="Show rulers" isActive={rulerActive} onClick={toggleRulers}>
-        <Icon icon="tdesign:measurement-1" />
-      </PillButton>
+      {!compact && (
+        <PillButton title="Show rulers" isActive={rulerActive} onClick={toggleRulers}>
+          <Icon icon="tdesign:measurement-1" />
+        </PillButton>
+      )}
       <ColorBlindnessTools getWebview={getWebview} onSimulationChange={onSimulationChange} />
       <Popover
         triggerTitle="More device tools"
@@ -266,6 +272,27 @@ const Toolbar = ({
       >
         {({close}) => (
           <>
+            {compact && (
+              <>
+                <MoreItem
+                  title="Scroll to top"
+                  icon="ic:baseline-arrow-upward"
+                  onClick={() => {
+                    close();
+                    scrollToTop();
+                  }}
+                />
+                <MoreItem
+                  title="Show rulers"
+                  icon="tdesign:measurement-1"
+                  checked={rulerActive}
+                  onClick={() => {
+                    close();
+                    toggleRulers();
+                  }}
+                />
+              </>
+            )}
             <MoreItem
               title="Full-page screenshot"
               icon="ic:outline-photo-camera"
