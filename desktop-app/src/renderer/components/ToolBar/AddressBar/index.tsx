@@ -197,7 +197,7 @@ const AddressBar = () => {
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragExit}
         onDrop={handleDrop}
-        className="relative z-10 w-full grow"
+        className="relative z-40 w-full grow"
       >
         <div className="absolute top-full left-2 z-50">
           <SitePermissionsDropdown
