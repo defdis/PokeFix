@@ -6,7 +6,20 @@ import {z} from 'zod';
  * (.erb/scripts/generate-mcp-manifest.ts). This module must only ever import
  * zod — never electron or anything that does.
  */
+const SESSION_HANDOFF_DESCRIPTION =
+  'Read-only snapshot for agents starting work in this app: current page URL, title, ' +
+  'layout/zoom, active device previews, pending annotation marks (NOT consumed — safe to ' +
+  'call at session start), and the 10 most recent pages with timestamps. Returns a Markdown ' +
+  'brief followed by the raw JSON payload. Modifies nothing. Call this first when picking up ' +
+  'work in a Pokefix window.';
+
 export const toolDefs = {
+  get_session_handoff: {
+    description: SESSION_HANDOFF_DESCRIPTION,
+  },
+  get_work_status: {
+    description: `${SESSION_HANDOFF_DESCRIPTION} (Alias of get_session_handoff.)`,
+  },
   get_app_state: {
     description:
       'Inspect the browser viewports currently open in Pokefix before checking ' +

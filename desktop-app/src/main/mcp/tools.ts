@@ -6,6 +6,7 @@ import {
   McpCaptureTargetsResult,
   McpClearAnnotationsResult,
   McpDeviceInfo,
+  McpHistoryEntry,
   McpNavigateResult,
   McpSetActiveDevicesResult,
   McpSkippedCapture,
@@ -14,6 +15,7 @@ import {captureImage} from '../screenshot';
 import {GetMainWindow, sendBridgeCommand} from './bridge';
 import {clickElement, readPage, typeText} from './interactions';
 import {toolDefs} from './toolDefs';
+import {buildHandoff} from './handoff';
 import {normalizeUrl} from './utils';
 
 const MAX_SCREENSHOT_WIDTH = 1000;
@@ -86,6 +88,46 @@ const captureTarget = async (
 };
 
 export const registerTools = (server: McpServer, getMainWindow: GetMainWindow) => {
+  const handoffHandler = async () => {
+    let appState: McpAppState | null = null;
+    try {
+      appState = await sendBridgeCommand<McpAppState>(getMainWindow, 'get-app-state');
+    } catch (error) {
+      return errorResult(error);
+    }
+    // Both side-channels are best-effort: the tool still answers if one fails.
+    let annotations: McpAnnotationsResult | null = null;
+    let annotationsError: string | undefined;
+    try {
+      annotations = await sendBridgeCommand<McpAnnotationsResult>(getMainWindow, 'get-annotations');
+    } catch (error) {
+      annotationsError = error instanceof Error ? error.message : String(error);
+    }
+    let history: McpHistoryEntry[] | null = null;
+    let historyError: string | undefined;
+    try {
+      history = await sendBridgeCommand<McpHistoryEntry[]>(getMainWindow, 'get-history');
+    } catch (error) {
+      historyError = error instanceof Error ? error.message : String(error);
+    }
+    const {markdown, json} = buildHandoff({
+      appState,
+      annotations,
+      annotationsError,
+      history,
+      historyError,
+      now: new Date().toISOString(),
+    });
+    return {
+      content: [
+        {type: 'text' as const, text: markdown},
+        {type: 'text' as const, text: JSON.stringify(json, null, 2)},
+      ],
+    };
+  };
+  server.registerTool('get_session_handoff', toolDefs.get_session_handoff, handoffHandler);
+  server.registerTool('get_work_status', toolDefs.get_work_status, handoffHandler);
+
   server.registerTool('get_app_state', toolDefs.get_app_state, async () => {
     try {
       const state = await sendBridgeCommand<McpAppState>(getMainWindow, 'get-app-state');

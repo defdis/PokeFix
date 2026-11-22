@@ -58,7 +58,8 @@ export type McpBridgeCommand =
   | 'set-active-devices'
   | 'get-capture-targets'
   | 'get-annotations'
-  | 'clear-annotations';
+  | 'clear-annotations'
+  | 'get-history';
 
 export interface McpBridgeRequest {
   requestId: string;
@@ -79,6 +80,12 @@ export interface McpActiveDevice {
   width: number;
   height: number;
   type: string;
+}
+
+export interface McpHistoryEntry {
+  url: string;
+  title: string;
+  lastVisited: number;
 }
 
 export interface McpAppState {

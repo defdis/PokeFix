@@ -9,6 +9,7 @@ import {
   McpCaptureTargetsResult,
   McpClearAnnotationsResult,
   McpDeviceInfo,
+  McpHistoryEntry,
   McpNavigatePayload,
   McpNavigateResult,
   McpSetActiveDevicesPayload,
@@ -343,6 +344,32 @@ const safeGetUrl = (webview: Electron.WebviewTag): string => {
   }
 };
 
+/**
+ * Last visited pages, for the get_session_handoff tool. Reads the same
+ * electron-store key the renderer writes on every navigation.
+ */
+const getHistory = (): McpHistoryEntry[] => {
+  try {
+    const raw = window.electron.store.get('history') as unknown;
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw
+      .slice(0, 10)
+      .map((entry) => {
+        const item = entry as Partial<McpHistoryEntry> | null;
+        return {
+          url: typeof item?.url === 'string' ? item.url : '',
+          title: typeof item?.title === 'string' ? item.title : '',
+          lastVisited: typeof item?.lastVisited === 'number' ? item.lastVisited : 0,
+        };
+      })
+      .filter((entry) => entry.url !== '');
+  } catch {
+    return [];
+  }
+};
+
 const clearAllAnnotations = async (state: RootState): Promise<McpClearAnnotationsResult> => {
   const result: McpClearAnnotationsResult = {cleared: [], skipped: []};
   await Promise.all(
@@ -391,6 +418,8 @@ export const executeMcpCommand = async (
       return collectAnnotations(store.getState());
     case 'clear-annotations':
       return clearAllAnnotations(store.getState());
+    case 'get-history':
+      return getHistory();
     default:
       throw new Error(`Unknown MCP command: ${command}`);
   }
