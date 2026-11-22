@@ -19,13 +19,13 @@ const stateWith = (overrides: Partial<DevtoolsState>): DevtoolsState => ({
 describe('devtools slice', () => {
   it('has pure defaults', () => {
     const state = reducer(undefined, {type: '@@INIT'});
-    expect(state.dockPosition).toBe(DOCK_POSITION.BOTTOM);
+    expect(state.dockPosition).toBe(DOCK_POSITION.UNDOCKED);
     expect(state.isOpen).toBe(false);
     expect(state.webViewId).toBe(-1);
   });
 
-  it('setDevtoolsOpen records the webview id', () => {
-    const state = reducer(undefined, setDevtoolsOpen(42));
+  it('setDevtoolsOpen records the webview id when docked', () => {
+    const state = reducer(stateWith({dockPosition: DOCK_POSITION.BOTTOM}), setDevtoolsOpen(42));
     expect(state.isOpen).toBe(true);
     expect(state.webViewId).toBe(42);
   });

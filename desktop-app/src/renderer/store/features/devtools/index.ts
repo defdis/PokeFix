@@ -23,7 +23,7 @@ export interface DevtoolsState {
 const initialState: DevtoolsState = {
   bounds: defaultBounds,
   isOpen: false,
-  dockPosition: DOCK_POSITION.BOTTOM,
+  dockPosition: DOCK_POSITION.UNDOCKED,
   webViewId: -1,
 };
 

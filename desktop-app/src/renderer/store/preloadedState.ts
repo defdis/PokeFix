@@ -1,4 +1,5 @@
 import {PREVIEW_LAYOUTS} from 'common/constants';
+import type {DockPosition} from './features/devtools';
 import {Device, getDevicesMap} from 'common/deviceList';
 import {DEFAULT_SUITE, PreviewSuites} from './features/device-manager';
 import {sanitizeSuites} from './features/device-manager/utils';
@@ -20,9 +21,10 @@ const zoomFactorFromStep = (stepIndex: unknown): number => {
 
 /**
  * All reads from the persisted electron-store happen here, once, at renderer
- * bootstrap — slices stay pure and never touch window.electron. The one write
- * is suite sanitization (dropping deleted custom devices), which persists its
- * cleanup immediately so the store never re-serves stale suites.
+ * bootstrap — slices stay pure and never touch window.electron. The two
+ * writes are suite sanitization (dropping deleted custom devices) and a
+ * one-time devtools dock migration (BOTTOM was the old cramped default;
+ * detached window won by user request in 2026-11).
  */
 export const buildPreloadedState = () => {
   const {store} = window.electron;
@@ -34,6 +36,18 @@ export const buildPreloadedState = () => {
   if (dirty) {
     store.set('deviceManager.previewSuites', suites);
   }
+
+  // One-time dock migration: pre-2.0 default BOTTOM docked the DevTools into
+  // an unusably small strip; open detached instead. Explicit RIGHT choices are kept.
+  let dockPosition = store.get('devtools.dockPosition') as DockPosition | undefined;
+  if (!store.get('devtools.dockMigrationV2')) {
+    if (dockPosition === 'BOTTOM' || dockPosition === undefined) {
+      dockPosition = 'UNDOCKED';
+      store.set('devtools.dockPosition', 'UNDOCKED');
+    }
+    store.set('devtools.dockMigrationV2', true);
+  }
+  dockPosition = dockPosition ?? 'UNDOCKED';
 
   const devicesMap = getDevicesMap();
   const activeDeviceIds: string[] = store.get('deviceManager.activeDevices') ?? [];
@@ -73,7 +87,7 @@ export const buildPreloadedState = () => {
     devtools: {
       bounds: {x: 0, y: 0, width: 0, height: 0},
       isOpen: false,
-      dockPosition: store.get('devtools.dockPosition') ?? 'BOTTOM',
+      dockPosition,
       webViewId: -1,
     },
     annotator: {
