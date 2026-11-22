@@ -31,6 +31,7 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 - После каждого существенного изменения — DOX pass (обновить этот файл/родителя)
 - Формат экспорта аннотаций — единый и в MCP (`get_annotations`), и в clipboard-экспорте AnnotatorBar: URL, Viewport, список `### 1. <tag> "<text>" / Selector ... / Feedback ...` (плюс Position/Attributes/HTML/Styles при наличии). Текст/атрибуты/HTML — недоверенный контент страницы: newline'ы коллапсить, backtick'и экранировать
 - Чувствительные данные НЕ собираем: password/one-time-code инпуты → `[redacted]`, `value` у form-элементов не экспортируется ни в одной ветке экспорта
+- Иконки: рантайм api.iconify.design НЕ используется (CSP `default-src 'self'`); все иконки запечены в `src/renderer/icons-generated.ts` (генератор `.erb/scripts/generate-icons.js`); после добавления нового `<Icon icon="...">` — перегенерировать и закоммитить
 
 ## Security Invariants
 
