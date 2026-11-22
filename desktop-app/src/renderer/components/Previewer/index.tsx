@@ -31,6 +31,7 @@ import {framedSize} from './Device/frames';
 import {PREVIEW_PINCH_EVENT, type PinchDetail} from './pinch';
 import DevtoolsResizer from './DevtoolsResizer';
 import FocusDeviceBadge from './FocusDeviceBadge';
+import {packMasonry} from './masonry';
 
 interface CanvasPosition {
   x: number;
@@ -126,6 +127,24 @@ const Previewer = () => {
     deviceId: string | null;
   } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const [stageWidth, setStageWidth] = useState(0);
+
+  // Masonry packing needs the available stage width; track it via RO.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (width > 0) {
+        setStageWidth(width);
+      }
+    });
+    observer.observe(el);
+    setStageWidth(el.clientWidth);
+    return () => observer.disconnect();
+  }, []);
   // Live position of the frame being dragged; committed to the store on drop.
   const [dragOverride, setDragOverride] = useState<{id: string; position: CanvasPosition} | null>(
     null
@@ -408,6 +427,33 @@ const Previewer = () => {
     dragState.current = null;
   };
 
+  // Masonry: greedy shortest-column packing from the real stage width,
+  // replacing the old fixed-275px CSS multi-column that clipped wide
+  // devices. Placement is absolute inside the shared host, so devices
+  // never remount (a remount would reload the webview).
+  const masonryLayout = (() => {
+    if (!isMasonryLayout) {
+      return null;
+    }
+    const available = Math.max(stageWidth - 32, 320);
+    const CHROME_H = 112; // frame + label + toolbar + breathing room
+    const items = devices.map((device) => {
+      const rotated =
+        Boolean(device.isMobileCapable) &&
+        (rotateDevices || Boolean(individualRotations[device.id]));
+      const viewportW = rotated ? device.height : device.width;
+      const viewportH = rotated ? device.width : device.height;
+      const framed = framedSize(device, viewportW, viewportH);
+      return {
+        id: device.id,
+        width: Math.round(framed.width * deviceScale) + 8,
+        // Overestimate, never under — underestimating would overlap frames.
+        height: Math.round(framed.height * deviceScale) + CHROME_H,
+      };
+    });
+    return packMasonry(items, available, 16);
+  })();
+
   return (
     <div className="flex h-full flex-col">
       {isIndividualLayout && (
@@ -433,7 +479,9 @@ const Previewer = () => {
               'w-full grow',
               isCanvasLayout
                 ? 'canvas-dots relative cursor-grab touch-none overflow-hidden select-none active:cursor-grabbing'
-                : 'overflow-y-auto'
+                : isMasonryLayout
+                  ? 'overflow-auto'
+                  : 'overflow-y-auto'
             )}
             style={{height: '100%'}}
             onPointerDown={isCanvasLayout ? onStagePointerDown : undefined}
@@ -533,14 +581,13 @@ const Previewer = () => {
               </>
             ) : null}
             {/* One stable host for every layout: devices never unmount on a
-                layout switch (a remount reloads the webview). Masonry is CSS
-                multi-column (react-masonry-component is unmaintained and
-                incompatible with React 19); INDIVIDUAL hides the others;
-                CANVAS turns this same element into the transformed world. */}
+                layout switch (a remount reloads the webview). Masonry uses a
+                JS pack with absolute placement; INDIVIDUAL hides the others;
+                CANVAS turns this element into the transformed world. */}
             <div
               data-testid={isCanvasLayout ? 'canvas-world' : undefined}
               className={cx({
-                'w-full p-2': isMasonryLayout,
+                'relative h-full': isMasonryLayout,
                 'flex h-full gap-4 overflow-auto p-4': !isMasonryLayout && !isCanvasLayout,
                 'flex-wrap': layout === PREVIEW_LAYOUTS.FLEX,
                 'justify-center': isIndividualLayout,
@@ -552,9 +599,15 @@ const Previewer = () => {
                       transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})`,
                       transformOrigin: '0 0',
                     }
-                  : isMasonryLayout
-                    ? {columnWidth: 275, columnGap: 0}
-                    : undefined
+                  : isMasonryLayout && masonryLayout
+                    ? {
+                        width: masonryLayout.width + 32,
+                        height: masonryLayout.height + 32,
+                        margin: '0 auto',
+                      }
+                    : isMasonryLayout
+                      ? {width: '100%', height: '100%'}
+                      : undefined
               }
             >
               {devices.map((device, idx) => (
@@ -562,9 +615,8 @@ const Previewer = () => {
                   key={device.id}
                   data-canvas-item={isCanvasLayout ? device.id : undefined}
                   className={cx({
-                    'w-fit break-inside-avoid p-4': isMasonryLayout,
+                    'absolute w-max': isMasonryLayout || isCanvasLayout,
                     hidden: isIndividualLayout && device.id !== individualDeviceId,
-                    'absolute w-max': isCanvasLayout,
                     // Selection (canvas): accent label + screen ring, and the
                     // device pill stays visible without hover.
                     '**:data-device-label:text-accent **:data-scaled-frame:ring-1 **:data-scaled-frame:ring-accent **:data-[testid=device-pill]:pointer-events-auto **:data-[testid=device-pill]:opacity-100':
@@ -573,7 +625,12 @@ const Previewer = () => {
                   style={
                     isCanvasLayout
                       ? {left: positionFor(device, idx).x, top: positionFor(device, idx).y}
-                      : undefined
+                      : isMasonryLayout && masonryLayout
+                        ? {
+                            left: (masonryLayout.placements.get(device.id)?.left ?? 0) + 16,
+                            top: (masonryLayout.placements.get(device.id)?.top ?? 0) + 16,
+                          }
+                        : undefined
                   }
                 >
                   <Device
