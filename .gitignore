@@ -1,2 +1,10 @@
 .DS_Store
 .idea
+
+# Pokefix fork: local-only scratch and build artifacts
+**/.yarn/install-state.gz
+IDEA.md
+logo-drafts/
+logo-glm-a.svg
+desktop-app/icons/
+desktop-app/src/assets

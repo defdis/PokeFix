@@ -1,11 +1,11 @@
 {
-  "name": "ResponsivelyApp",
+  "name": "pokefix",
   "version": "2.0.0-beta.0",
-  "description": "A developer-friendly browser for developing responsive web apps",
-  "license": "MIT",
+  "description": "Pokefix — multi-viewport browser for responsive UI work, with an MCP bridge for AI agents.",
+  "license": "AGPL-3.0-only",
   "author": {
-    "name": "Responsively",
-    "email": "p.manoj.vivek@gmail.com"
+    "name": "defdis",
+    "url": "https://github.com/defdis"
   },
   "main": "./dist/main/main.js",
   "scripts": {

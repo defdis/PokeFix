@@ -1,27 +1,27 @@
 {
-  "name": "Responsively-App",
-  "productName": "ResponsivelyApp",
+  "name": "pokefix",
+  "productName": "Pokefix",
   "version": "2.0.0-beta.0",
-  "description": "A developer-friendly browser for developing responsive web apps",
+  "description": "Pokefix — multi-viewport browser for responsive UI work, with an MCP bridge that hands marked-up elements to AI agents.",
   "keywords": [
     "developer-tools",
     "devtools",
     "browser",
     "web-dev"
   ],
-  "homepage": "https://responsively.app",
+  "homepage": "https://github.com/defdis/PokeFix",
   "bugs": {
-    "url": "https://github.com/responsively-org/responsively-app/issues"
+    "url": "https://github.com/defdis/PokeFix/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/responsively-org/responsively-app.git"
+    "url": "https://github.com/defdis/PokeFix.git"
   },
   "author": {
-    "name": "Responsively",
-    "email": "p.manoj.vivek@gmail.com"
+    "name": "defdis",
+    "url": "https://github.com/defdis"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "main": "./src/main/main.ts",
   "scripts": {
     "build": "concurrently \"yarn run build:main\" \"yarn run build:renderer\" \"yarn run build:mcp\"",
@@ -151,8 +151,8 @@
     "webpack-merge": "^6.0.1"
   },
   "build": {
-    "productName": "ResponsivelyApp",
-    "appId": "app.responsively",
+    "productName": "Pokefix",
+    "appId": "app.pokefix",
     "asar": true,
     "asarUnpack": "**\\*.{node,dll}",
     "files": [
@@ -220,9 +220,6 @@
     "publish": {
       "provider": "github"
     }
-  },
-  "collective": {
-    "url": "https://opencollective.com/responsively"
   },
   "resolutions": {
     "@types/react": "^19.3.0",

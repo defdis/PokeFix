@@ -87,6 +87,8 @@ When the user requests a durable behavior change, record it here or in the relev
 
 ## Project Snapshot (fork)
 
-- Что это: форк Responsively 2.0.0-beta.0 (`AGPL-3.0`, ветка `fork/annotator`).
-- Цель: встроить markagent-стиль аннотатор UI (.Cmd+Shift+. тумблер, Alt+кли разметка, note-поповер) + MCP-tools `get_annotations`/`clear_annotations`; формат экспорта — как в фидбеках юзера (URL/Viewport/### 1. tag "text"/Selector/Feedback).
-- Позиция на 2026-11-17: этап 0 готов (сборка чистая, dev-запуск работает, MCP HTTP на 127.0.0.1:12720 отвечает initialize 200). Следующий этап — аннотатор в preload-webview + MCP-tools.
+- Что это: Pokefix — форк Responsively 2.0.0-beta.0 (`AGPL-3.0`, ветка `fork/annotator`, origin → github.com/defdis/PokeFix).
+- Сделано: аннотатор (Annotate-кнопка + Alt+клик + note-поповер + AnnotatorBar снизу), MCP-tools `get_annotations`/`clear_annotations`, send-to-agent webhook-кнопка, Hermes one-click config.
+- 2026-11-22, production-hardening pass: исправлены баги аннотатора (гонки clear, autofix-цикл поллинга, reload-потеря ввода, checkbox-снап-бэк), утечка секретов (password-поля редректируются из экспорта), `contextIsolation` pin, loopback-only webhook, certificate-error host-match, openExternal allowlist, CSP `default-src`, store-bridge сужен (webPermissions — main-only), debug-логи вырезаны, кастомные macOS-иконки (824/1024 сетка), rebrand (appId `app.pokefix`, binary paths Pokefix, README/иконки/README-бейджи), апстрим-спонсорство выпилено, electron-updater отключён (нет своего feed'а).
+- Осталось до релиза: unsigned сборка (`yarn package`), GitHub Release на defdis/PokeFix (нужны repo и явное «го» от юзера); подпись/нотаризация невозможна без Developer ID; publish-workflows НЕ трогать до отдельного решения.
+- Формат экспорта аннотаций — как в фидбеках юзера (URL/Viewport/### 1. tag "text"/Selector/Feedback); редактировать синхронно в `commands.ts` (MCP) и `AnnotatorBar` (clipboard).
