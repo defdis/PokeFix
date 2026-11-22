@@ -427,8 +427,8 @@ const baHoverLabel = document.createElement('div');
 baHoverLabel.id = 'ba-annotator-hover-label';
 baHoverLabel.style.cssText =
   'position:absolute;display:none;z-index:2147483646;pointer-events:none;' +
-  'background:rgba(17,17,22,.92);color:#e8e8ea;font:12px/1.5 -apple-system,system-ui,sans-serif;letter-spacing:.01em;' +
-  'padding:2px 7px;border-radius:4px;white-space:pre;box-shadow:0 1px 4px rgba(0,0,0,.4);';
+  'background:rgba(17,17,22,.92);color:#e8e8ea;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;' +
+  'padding:4px 8px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.4);max-width:440px;';
 const baClipBand = (
   outer: {x: number; y: number; w: number; h: number},
   inner: {x: number; y: number; w: number; h: number}
@@ -453,6 +453,26 @@ const baFmtBox = (values: number[]): string => {
   if (t === b && r === l) return `${px(t)} ${px(r)}`;
   if (r === l) return `${px(t)} ${px(r)} ${px(b)}`;
   return `${px(t)} ${px(r)} ${px(b)} ${px(l)}`;
+};
+const baEscapeHtml = (value: string): string =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Compact-but-readable selector for the hover chip: tag#id.upto3-classes, grapheme-capped.
+const baSelectorFor = (el: Element): string => {
+  let sel = el.tagName.toLowerCase();
+  if (el.id) {
+    sel += `#${el.id.length > 32 ? el.id.slice(0, 32) + '…' : el.id}`;
+  }
+  const classes = Array.from(el.classList).filter(
+    (c) => c.length > 0 && c.length <= 28 && !c.startsWith('ba-')
+  );
+  const shown = classes.slice(0, 3);
+  if (shown.length > 0) {
+    sel += `.${shown.join('.')}`;
+  }
+  if (classes.length > shown.length) {
+    sel += '…';
+  }
+  return sel.length > 76 ? `${sel.slice(0, 75)}…` : sel;
 };
 
 let baPicking = false;
@@ -581,12 +601,12 @@ const baHoverMove = (event: MouseEvent) => {
     baHoverPadding.style.display = 'none';
   }
 
-  // Value chip: colored swatches + words, CSS-shorthand values with units.
-  // All interpolated values are numbers we parsed — no page content.
+  // Chip: line 1 = selector (escaped), line 2 = box-model metrics.
   baHoverLabel.innerHTML =
-    `<span style="color:#f6b26b">&#9632;</span> margin ${baFmtBox([mt, mr, mb, ml])}` +
-    `<span style="opacity:.45"> &nbsp;·&nbsp; </span>` +
-    `<span style="color:#93c47d">&#9632;</span> padding ${baFmtBox([pt, pr, pb, pl])}`;
+    `<div style="color:#a8b4ff;max-width:424px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${baEscapeHtml(baSelectorFor(target))}</div>` +
+    `<div style="white-space:nowrap"><span style="color:#f6b26b">&#9632;</span> margin ${baFmtBox([mt, mr, mb, ml])}` +
+    `<span style="opacity:.4"> · </span>` +
+    `<span style="color:#93c47d">&#9632;</span> padding ${baFmtBox([pt, pr, pb, pl])}</div>`;
   baHoverLabel.style.display = 'block';
   const labelTop = mTop - 26 >= window.scrollY + 4 ? mTop - 26 : rect.bottom + sy + 6;
   baHoverLabel.style.left = `${Math.max(mLeft, 4)}px`;
