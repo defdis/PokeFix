@@ -433,8 +433,9 @@ const baClipBand = (
   outer: {x: number; y: number; w: number; h: number},
   inner: {x: number; y: number; w: number; h: number}
 ): string =>
-  `polygon(evenodd, 0 0, ${outer.w}px 0, ${outer.w}px ${outer.h}px, 0 ${outer.h}px, ` +
-  `${inner.x}px ${inner.y}px, 0 ${inner.y}px, 0 ${inner.y + inner.h}px, ${inner.x}px ${inner.y + inner.h}px, ${inner.x + inner.w}px ${inner.y + inner.h}px, ${inner.x + inner.w}px ${inner.y}px)`;
+  `polygon(evenodd, ` +
+  `0px 0px, ${outer.w}px 0px, ${outer.w}px ${outer.h}px, 0px ${outer.h}px, 0px 0px, ` +
+  `${inner.x}px ${inner.y}px, ${inner.x + inner.w}px ${inner.y}px, ${inner.x + inner.w}px ${inner.y + inner.h}px, ${inner.x}px ${inner.y + inner.h}px, ${inner.x}px ${inner.y}px)`;
 // px helpers for box-model math
 const baPx = (value: string): number => {
   const n = parseFloat(value);
