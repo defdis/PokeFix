@@ -60,6 +60,8 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 - После изменений: `yarn lint && yarn typecheck && yarn test`
 - Ручной smoke: `yarn start` → открыть URL → RPC initialize на `127.0.0.1:12720` → 200
 - Release-сборка (unsigned): `yarn package` → артефакт в `release/build/` (productName Pokefix, appId `app.pokefix`; нужна иконка 1024 PNG в assets)
+- Версия релиза хранится в ДВУХ местах: `desktop-app/package.json` (зовётся `yarn package`) и `release/app/package.json` + `release/app/package-lock.json` (two-package.json; `release/app` НЕ в git) — бампать оба, иначе DMG и `app.getVersion()` (он же версия MCP-сервера) останутся на старой версии
+- Подпись релизов: 0.9.x — только adhoc (`--config.mac.identity=-`; обычная `yarn package` подхватит Apple Development cert из связки — для дистрибуции НЕ годится). Нотаризация (Developer ID Application + notarytool) — перед 1.0, требует Apple Developer Program ($99/год). В 0.9.0 у пользователей будет right-click → Open
 
 ## Child DOX Index
 
