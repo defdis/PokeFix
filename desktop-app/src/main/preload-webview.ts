@@ -608,8 +608,13 @@ const baHoverMove = (event: MouseEvent) => {
     `<span style="opacity:.4"> · </span>` +
     `<span style="color:#93c47d">&#9632;</span> padding ${baFmtBox([pt, pr, pb, pl])}</div>`;
   baHoverLabel.style.display = 'block';
-  const labelTop = mTop - 26 >= window.scrollY + 4 ? mTop - 26 : rect.bottom + sy + 6;
-  baHoverLabel.style.left = `${Math.max(mLeft, 4)}px`;
+  const labelHeight = baHoverLabel.offsetHeight;
+  const labelWidth = baHoverLabel.offsetWidth;
+  const gap = 6;
+  const aboveTop = mTop - gap - labelHeight;
+  const labelTop = aboveTop >= window.scrollY + 4 ? aboveTop : rect.bottom + sy + gap;
+  const maxLeft = window.scrollX + window.innerWidth - labelWidth - 4;
+  baHoverLabel.style.left = `${Math.max(window.scrollX + 4, Math.min(mLeft, Math.max(maxLeft, window.scrollX + 4)))}px`;
   baHoverLabel.style.top = `${labelTop}px`;
 };
 
