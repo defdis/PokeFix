@@ -22,7 +22,7 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 
 ## Directory Map
 
-- `src/main/agent-terminal.ts` — «агентный терминал»: xterm.js в доке снизу (как AnnotatorBar), pty через node-pty (native в release/app deps, ребилд через electron-rebuild), whitelist из 5 CLI (hermes/claude/codex/gemini/opencode), один сеанс, cwd = baAgentCwd
+- `src/main/acp-chat.ts` + `src/common/acp.ts` — «Агент-чат»: ACP (Agent Client Protocol) по stdio к `hermes acp` / `opencode acp`; стриминг `session/update` (agent_message_chunk/tool_call/usage), permission-запросы → inline-кнопки; cwd = `baAgentCwd` (общая с самолётиком); UI: `src/renderer/components/AgentChat/` (FAB + панель)
 - `src/main/mcp/` — MCP-сервер: `toolDefs.ts` (чистые zod-схемы, БЕЗ electron-импортов — шарятся с npm-пакетом), `tools.ts` (реализация), `bridge.ts` (IPC main→renderer), `index.ts` (HTTP на 12720), `agent-config.ts` (one-click конфиги 11 агентов; пишет `<userData>/mcp/cli.js` + `ELECTRON_RUN_AS_NODE=1`, не npm)
 - `src/renderer/components/McpBridge/` — исполняет MCP-команды в webviews
 - `src/main/screenshot/` — скриншоты кадров (использовать для аннотаций, не изобретать своё)

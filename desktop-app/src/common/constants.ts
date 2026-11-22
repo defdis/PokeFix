@@ -67,13 +67,14 @@ export const IPC_MAIN_CHANNELS = {
   BA_AGENT_RUN: 'ba-agent-run',
   BA_AGENT_CANCEL: 'ba-agent-cancel',
   BA_PICK_DIRECTORY: 'ba-pick-directory',
-  TERMINAL_LIST_AGENTS: 'terminal-list-agents',
-  TERMINAL_OPEN: 'terminal-open',
-  TERMINAL_KILL: 'terminal-kill',
-  TERMINAL_WRITE: 'terminal-write',
-  TERMINAL_RESIZE: 'terminal-resize',
-  TERMINAL_DATA: 'terminal-data',
-  TERMINAL_EXIT: 'terminal-exit',
+  AGENT_CHAT_AGENTS: 'agent-chat-agents',
+  AGENT_CHAT_SPAWN: 'agent-chat-spawn',
+  AGENT_CHAT_SEND: 'agent-chat-send',
+  AGENT_CHAT_CANCEL: 'agent-chat-cancel',
+  AGENT_CHAT_KILL: 'agent-chat-kill',
+  AGENT_CHAT_PERMISSION: 'agent-chat-permission',
+  AGENT_CHAT_EVENT: 'agent-chat-event',
+  AGENT_CHAT_EXIT: 'agent-chat-exit',
 } as const;
 
 export type Channels = (typeof IPC_MAIN_CHANNELS)[keyof typeof IPC_MAIN_CHANNELS];

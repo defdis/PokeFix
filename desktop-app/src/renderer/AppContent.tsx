@@ -17,7 +17,7 @@ import McpBridge from './components/McpBridge';
 import AnnouncementCard from './components/AnnouncementCard';
 import {AboutDialog} from './components/AboutDialog';
 import AnnotatorBar from './components/AnnotatorBar';
-import AgentDock from './components/AgentDock';
+import AgentChat from './components/AgentChat';
 
 /** Present mode only applies while the canvas layout is active. */
 const usePresenting = (): boolean => {
@@ -34,9 +34,9 @@ const Browser = () => {
       <div className="min-h-0 flex-1">
         <Previewer />
       </div>
-      {presenting ? null : <AgentDock />}
       {presenting ? null : <AnnotatorBar />}
       {presenting ? null : <StatusBar />}
+      {presenting ? null : <AgentChat />}
     </div>
   );
 };

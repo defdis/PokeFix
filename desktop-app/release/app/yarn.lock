@@ -894,15 +894,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-addon-api@npm:^7.1.0":
-  version: 7.1.1
-  resolution: "node-addon-api@npm:7.1.1"
-  dependencies:
-    node-gyp: "npm:latest"
-  checksum: 10c0/fb32a206276d608037fa1bcd7e9921e177fe992fc610d098aa3128baca3c0050fc1e014fa007e9b3874cf865ddb4f5bd9f43ccb7cbbbe4efaff6a83e920b17e9
-  languageName: node
-  linkType: hard
-
 "node-gyp@npm:latest":
   version: 13.1.0
   resolution: "node-gyp@npm:13.1.0"
@@ -920,16 +911,6 @@ __metadata:
   bin:
     node-gyp: bin/node-gyp.js
   checksum: 10c0/c6693e52e0e111b21f5cd8ff303b41b51f40338adcc79ac5c6a02399eba7039d50dc816dcafcc485870291a641f7cb75db8887a9bdd0de537fe635a3a81cba5b
-  languageName: node
-  linkType: hard
-
-"node-pty@npm:^1.1.0":
-  version: 1.1.0
-  resolution: "node-pty@npm:1.1.0"
-  dependencies:
-    node-addon-api: "npm:^7.1.0"
-    node-gyp: "npm:latest"
-  checksum: 10c0/e527305263da36d554b7d2116aee6430b898675fc50e7bd82fbd762f14cb6b948fb8d997736af1f70d76bf9ffd4f5179bc1ed1d8002567dfcf3b29f039291798
   languageName: node
   linkType: hard
 
@@ -1011,7 +992,6 @@ __metadata:
   resolution: "pokefix@workspace:."
   dependencies:
     browser-sync: "npm:^3.0.4"
-    node-pty: "npm:^1.1.0"
   languageName: unknown
   linkType: soft
 
