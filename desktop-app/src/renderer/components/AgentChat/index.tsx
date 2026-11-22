@@ -13,6 +13,8 @@ interface PermissionRequest {
   requestId: number;
   title: string;
   options: Array<{optionId: string; name: string; kind: string}>;
+  nonce?: string;
+  expired?: boolean;
 }
 
 interface AgentAvailability {
@@ -120,10 +122,20 @@ const AgentChat = () => {
     async (id: string, cwdOverride?: string) => {
       setStatus('spawning');
       const dir = cwdOverride ?? cwd;
-      const result = await window.electron.ipcRenderer.invoke<
-        {agentId: string; cwd?: string},
-        {ok: boolean; cwd?: string; error?: string}
-      >(IPC_MAIN_CHANNELS.AGENT_CHAT_SPAWN, {agentId: id, cwd: dir || undefined});
+      let result: {ok: boolean; cwd?: string; error?: string};
+      try {
+        result = await window.electron.ipcRenderer.invoke<
+          {agentId: string; cwd?: string},
+          {ok: boolean; cwd?: string; error?: string}
+        >(IPC_MAIN_CHANNELS.AGENT_CHAT_SPAWN, {agentId: id, cwd: dir || undefined});
+      } catch (error) {
+        setStatus('failed');
+        pushNote(
+          `Агент не запустился: ${error instanceof Error ? error.message : String(error)}`,
+          'error'
+        );
+        return;
+      }
       if (result.ok) {
         setStatus('ready');
         setCwd(result.cwd ?? dir ?? '');
@@ -210,6 +222,7 @@ const AgentChat = () => {
         }
         if (type === 'turn-complete') {
           setRunning(false);
+          setPermission(null);
           setItems((prev) =>
             prev.map((item) =>
               item.kind === 'assistant' && item.streaming ? {...item, streaming: false} : item
@@ -233,6 +246,7 @@ const AgentChat = () => {
       IPC_MAIN_CHANNELS.AGENT_CHAT_EXIT,
       (payload) => {
         setRunning(false);
+        setPermission(null);
         setStatus('failed');
         pushNote(`Агент завершил работу (код ${payload?.code ?? '?'}). Жми «Новый чат».`, 'info');
         setItems((prev) =>
@@ -246,9 +260,15 @@ const AgentChat = () => {
     const offPermission = window.electron.ipcRenderer.on<PermissionRequest>(
       IPC_MAIN_CHANNELS.AGENT_CHAT_PERMISSION,
       (payload) => {
-        if (payload && typeof payload.requestId === 'number') {
-          setPermission(payload);
+        if (!payload || typeof payload.requestId !== 'number') return;
+        if (payload.expired) {
+          setPermission((current) =>
+            current && current.requestId === payload.requestId ? null : current
+          );
+          pushNote('Время на решение истекло — агент увидел «cancelled».', 'info');
+          return;
         }
+        setPermission(payload);
       }
     );
 
@@ -256,6 +276,7 @@ const AgentChat = () => {
       offEvent?.();
       offExit?.();
       offPermission?.();
+      window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.AGENT_CHAT_KILL).catch(() => undefined);
     };
   }, [pushNote, scrollToBottom]);
 
@@ -271,19 +292,32 @@ const AgentChat = () => {
     setInput('');
     setRunning(true);
     stickToBottom.current = true;
-    const result = await window.electron.ipcRenderer.invoke<
-      {text: string},
-      {ok: boolean; error?: string}
-    >(IPC_MAIN_CHANNELS.AGENT_CHAT_SEND, {text});
-    if (!result.ok) {
+    try {
+      const result = await window.electron.ipcRenderer.invoke<
+        {text: string},
+        {ok: boolean; error?: string}
+      >(IPC_MAIN_CHANNELS.AGENT_CHAT_SEND, {text});
+      if (!result.ok) {
+        setRunning(false);
+        pushNote(result.error ?? 'Не удалось отправить', 'error');
+      }
+    } catch (error) {
       setRunning(false);
-      pushNote(result.error ?? 'Не удалось отправить', 'error');
+      pushNote(
+        `Не удалось отправить: ${error instanceof Error ? error.message : String(error)}`,
+        'error'
+      );
     }
     setTimeout(() => scrollToBottom(true), 30);
   };
 
   const stop = () => {
-    window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.AGENT_CHAT_CANCEL).catch(() => undefined);
+    window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.AGENT_CHAT_CANCEL).catch(() => {
+      setRunning(false);
+    });
+    // The turn-complete broadcast clears `running` authoritatively; if IPC is
+    // broken entirely, at least surface the button again shortly after.
+    window.setTimeout(() => setRunning(false), 1500);
   };
 
   const newSession = () => {
@@ -327,8 +361,11 @@ const AgentChat = () => {
       .invoke(IPC_MAIN_CHANNELS.AGENT_CHAT_PERMISSION, {
         requestId: permission.requestId,
         optionId,
+        nonce: permission.nonce,
       })
-      .catch(() => undefined);
+      .catch(() => {
+        /* stale card — main already forgot this request */
+      });
     setPermission(null);
   };
 
@@ -494,9 +531,11 @@ const AgentChat = () => {
                       onClick={() => respondPermission(option.optionId)}
                       className={cx(
                         'rounded-md px-2 py-1 text-[10.5px] font-semibold',
-                        option.kind.startsWith('allow')
+                        option.kind === 'allow_once'
                           ? 'bg-emerald-500/80 text-emerald-950 hover:bg-emerald-400'
-                          : 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                          : option.kind.startsWith('allow')
+                            ? 'border border-emerald-400/60 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+                            : 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
                       )}
                     >
                       {option.name}

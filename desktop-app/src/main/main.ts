@@ -335,6 +335,10 @@ const createWindow = async () => {
         ? path.join(__dirname, 'preload.js')
         : path.join(__dirname, '../../.erb/dll/preload.js'),
       webviewTag: true,
+      // Pinned explicitly: the renderer must never get node integration or lose
+      // context isolation, regardless of Electron default drift.
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   });
   if (windowState.isMaximized) {

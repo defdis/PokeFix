@@ -286,3 +286,78 @@ describe('setToolEntry (Continue yaml)', () => {
     expect(after).toContain('name: test');
   });
 });
+
+describe('setToolEntry (review hardening)', () => {
+  const hermesConfig = () => path.join(homeDir, '.hermes', 'config.yaml');
+
+  it('refuses a top-level JSON array config', () => {
+    write(cursorConfig(), '[]');
+    const result = setToolEntry(bridgeEnv(), 'cursor', true);
+    expect(result).toHaveProperty('error');
+    expect(fs.readFileSync(cursorConfig(), 'utf-8')).toBe('[]');
+  });
+
+  it('refuses a non-object serversKey instead of clobbering it', () => {
+    write(cursorConfig(), '{"mcpServers": [1, 2, 3]}');
+    const result = setToolEntry(bridgeEnv(), 'cursor', true);
+    expect(result).toHaveProperty('error');
+    expect(fs.readFileSync(cursorConfig(), 'utf-8')).toBe('{"mcpServers": [1, 2, 3]}');
+  });
+
+  it('detects a TOML section with a trailing comment', () => {
+    write(codexConfig(), '[mcp_servers.responsively] # ours\ncommand = "/bin/echo"\n');
+    // already present → adding must be a no-op (no duplicate table)
+    setToolEntry(bridgeEnv(), 'codex', true);
+    const raw = fs.readFileSync(codexConfig(), 'utf-8');
+    expect(raw.match(/\[mcp_servers\.responsively\]/g)).toHaveLength(1);
+  });
+
+  it('matches the child indentation of the yaml parent key', () => {
+    write(
+      hermesConfig(),
+      'model: test\nmcp_servers:\n    mempalace:\n      url: http://example.invalid/mcp\n'
+    );
+    setToolEntry(bridgeEnv(), 'hermes', true);
+    const raw = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(raw).toContain('    responsively:\n');
+    expect(raw).toContain('      command:');
+    // and removal still works
+    setToolEntry(bridgeEnv(), 'hermes', false);
+    const after = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(after).not.toContain('responsively');
+    expect(after).toContain('mempalace:');
+  });
+
+  it('keeps CRLF line endings in yaml round-trips', () => {
+    const crlf =
+      'model: test\r\nmcp_servers:\r\n  mempalace:\r\n    url: http://example.invalid/mcp\r\n';
+    write(hermesConfig(), crlf);
+    setToolEntry(bridgeEnv(), 'hermes', true);
+    const added = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(added).toContain('\r\n');
+    expect(added.split('\n').some((l) => !l.endsWith('\r') && l !== '')).toBe(false);
+    setToolEntry(bridgeEnv(), 'hermes', false);
+    const after = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(after).toContain('mempalace:');
+    expect(after.split('\n').some((l) => !l.endsWith('\r') && l !== '')).toBe(false);
+  });
+
+  it('refuses yaml with a dangling BEGIN marker', () => {
+    write(hermesConfig(), 'model: test\n# >>> pokefix-mcp >>>\n  responsively:\n');
+    const result = setToolEntry(bridgeEnv(), 'hermes', true);
+    expect(result).toHaveProperty('error');
+    expect(fs.readFileSync(hermesConfig(), 'utf-8')).toBe(
+      'model: test\n# >>> pokefix-mcp >>>\n  responsively:\n'
+    );
+  });
+
+  it('writes through a symlinked config instead of replacing the link', () => {
+    const real = path.join(homeDir, 'real-cursor.json');
+    write(real, '{}');
+    fs.mkdirSync(path.dirname(cursorConfig()), {recursive: true});
+    fs.symlinkSync(real, cursorConfig());
+    setToolEntry(bridgeEnv(), 'cursor', true);
+    expect(fs.lstatSync(cursorConfig()).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(real, 'utf-8')).toContain('responsively');
+  });
+});

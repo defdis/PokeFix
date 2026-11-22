@@ -234,7 +234,7 @@ const readJson = (file: string): Record<string, unknown> | null => {
   }
   try {
     const parsed = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null;
   } catch {
@@ -243,12 +243,41 @@ const readJson = (file: string): Record<string, unknown> | null => {
   }
 };
 
-/** Write via a temp file so a crash can't truncate someone's config. */
+/**
+ * Write via a temp file + rename so a crash can't truncate someone's config.
+ * - unique tmp name (two Pokefix instances can't clobber each other's scratch)
+ * - fsync before rename (and best-effort dir fsync after)
+ * - writes through symlinks to their target instead of replacing the link
+ */
 const writeAtomic = (file: string, contents: string): void => {
-  fs.mkdirSync(path.dirname(file), {recursive: true});
-  const tmp = `${file}.pokefix.tmp`;
-  fs.writeFileSync(tmp, contents, 'utf-8');
-  fs.renameSync(tmp, file);
+  let target = file;
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) {
+      target = fs.realpathSync(file);
+    }
+  } catch {
+    /* doesn't exist yet — fine */
+  }
+  fs.mkdirSync(path.dirname(target), {recursive: true});
+  const tmp = `${target}.pokefix-${process.pid}-${Date.now()}.tmp`;
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeFileSync(fd, contents, 'utf-8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, target);
+  try {
+    const dirFd = fs.openSync(path.dirname(target), 'r');
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
+  } catch {
+    /* dir fsync is best-effort on some filesystems */
+  }
 };
 
 const standardJsonEntry = (spec: BridgeSpec): Record<string, unknown> => ({
@@ -264,16 +293,27 @@ const opencodeEntry = (spec: BridgeSpec): Record<string, unknown> => ({
   ...(Object.keys(spec.env).length > 0 ? {environment: spec.env} : {}),
 });
 
+const eolOf = (raw: string): string => (raw.includes('\r\n') ? '\r\n' : '\n');
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const tomlEscape = (value: string): string => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
-const TOML_SECTION = (key: string) => `[${key}.${SERVER_KEY}]`;
+const TOML_SECTION_RE = (key: string) => new RegExp(`^\\s*\\[${key}\\.${SERVER_KEY}\\](\\s*#.*)?$`);
 
 const tomlHasEntry = (raw: string, serversKey: string): boolean =>
-  raw.split('\n').some((line) => line.trim() === TOML_SECTION(serversKey));
+  raw.split(/\r?\n/).some((line) => TOML_SECTION_RE(serversKey).test(line));
 
 const tomlAddEntry = (raw: string, serversKey: string, spec: BridgeSpec): string => {
+  for (const key of Object.keys(spec.env)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`Unsafe env key for TOML output: ${JSON.stringify(key)}`);
+    }
+  }
+  const eol = eolOf(raw);
   const block = [
-    TOML_SECTION(serversKey),
+    `[${serversKey}.${SERVER_KEY}]`,
     `command = "${tomlEscape(spec.command)}"`,
     `args = [${spec.args.map((a) => `"${tomlEscape(a)}"`).join(', ')}]`,
     ...(Object.keys(spec.env).length > 0
@@ -283,14 +323,15 @@ const tomlAddEntry = (raw: string, serversKey: string, spec: BridgeSpec): string
             .join(', ')} }`,
         ]
       : []),
-  ].join('\n');
+  ].join(eol);
   const base = raw.trim();
-  return base === '' ? `${block}\n` : `${base}\n\n${block}\n`;
+  return base === '' ? `${block}${eol}` : `${base}${eol}${eol}${block}${eol}`;
 };
 
 const tomlRemoveEntry = (raw: string, serversKey: string): string => {
-  const lines = raw.split('\n');
-  const start = lines.findIndex((line) => line.trim() === TOML_SECTION(serversKey));
+  const eol = eolOf(raw);
+  const lines = raw.split(eol);
+  const start = lines.findIndex((line) => TOML_SECTION_RE(serversKey).test(line));
   if (start === -1) {
     return raw;
   }
@@ -299,29 +340,53 @@ const tomlRemoveEntry = (raw: string, serversKey: string): string => {
     end += 1;
   }
   const kept = [...lines.slice(0, start), ...lines.slice(end)];
-  return `${kept
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()}\n`;
+  const joined = kept.join(eol).replace(new RegExp(`${eol}{3,}`, 'g'), eol + eol);
+  return `${joined.trim()}${eol}`;
 };
 
 // --- YAML: Hermes uses a map under `mcp_servers:`, Continue a list under
 // `mcpServers:`. Our entries live between marker comments we own, so they can
 // be added/removed without re-dumping — and without touching anything else.
 
-const YAML_BEGIN = '  # >>> pokefix-mcp >>>';
-const YAML_END = '  # <<< pokefix-mcp <<<';
+// Column-0 markers: matched by substring, so indentation is irrelevant.
+const YAML_BEGIN = '# >>> pokefix-mcp >>>';
+const YAML_END = '# <<< pokefix-mcp <<<';
 const yamlScalar = (value: string): string => JSON.stringify(value);
 
-const yamlBlockLines = (spec: BridgeSpec, asListItem: boolean): string[] => {
+const yamlBlockLines = (spec: BridgeSpec, asListItem: boolean, indent: number): string[] => {
+  const pad = ' '.repeat(indent);
+  const pad2 = ' '.repeat(indent + 2);
   const envLines =
     Object.keys(spec.env).length > 0
-      ? ['    env:', ...Object.entries(spec.env).map(([k, v]) => `      ${k}: ${yamlScalar(v)}`)]
+      ? [
+          `${pad2}env:`,
+          ...Object.entries(spec.env).map(([k, v]) => `${pad2}  ${k}: ${yamlScalar(v)}`),
+        ]
       : [];
   const head = asListItem
-    ? [`  - name: ${SERVER_KEY}`, '    type: stdio', `    command: ${yamlScalar(spec.command)}`]
-    : [`  ${SERVER_KEY}:`, `    command: ${yamlScalar(spec.command)}`];
-  return [...head, '    args:', ...spec.args.map((a) => `      - ${yamlScalar(a)}`), ...envLines];
+    ? [
+        `${pad}- name: ${SERVER_KEY}`,
+        `${pad2}type: stdio`,
+        `${pad2}command: ${yamlScalar(spec.command)}`,
+      ]
+    : [`${pad}${SERVER_KEY}:`, `${pad2}command: ${yamlScalar(spec.command)}`];
+  return [
+    ...head,
+    `${pad2}args:`,
+    ...spec.args.map((a) => `${pad2}  - ${yamlScalar(a)}`),
+    ...envLines,
+  ];
+};
+
+/** Indent of the first child of a top-level key line, or 2 when none exists. */
+const detectChildIndent = (lines: string[], keyLineIndex: number): number => {
+  for (let i = keyLineIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    if (!/^\s/.test(line)) return 2; // next top-level key → treat as childless
+    return line.match(/^ */)?.[0].length ?? 2;
+  }
+  return 2;
 };
 
 const yamlHasEntry = (raw: string): boolean => raw.includes(YAML_BEGIN);
@@ -331,45 +396,63 @@ const yamlHasEntry = (raw: string): boolean => raw.includes(YAML_BEGIN);
  * new top-level section when missing. Refuses to guess when the key exists
  * with an inline/flow value.
  */
-const yamlAdd = (raw: string, key: string, block: string[]): string | {error: string} => {
-  if (raw.includes(YAML_BEGIN)) {
+const yamlAdd = (
+  raw: string,
+  key: string,
+  spec: BridgeSpec,
+  asListItem: boolean
+): string | {error: string} => {
+  const eol = eolOf(raw);
+  const hasBegin = raw.includes(YAML_BEGIN);
+  const hasEnd = raw.includes(YAML_END);
+  if (hasBegin && hasEnd) {
     return raw; // already present (idempotent)
   }
-  const marked = [YAML_BEGIN, ...block, YAML_END].join('\n');
-  const keyRe = new RegExp(`^${key}:[ \\t]*$`, 'm');
-  const inlineRe = new RegExp(`^${key}:[ \\t]*\\S`, 'm');
-  const match = raw.match(keyRe);
-  if (match && match.index !== undefined) {
-    const insertAt = match.index + match[0].length;
-    return `${raw.slice(0, insertAt)}\n${marked}\n${raw.slice(insertAt)}`;
+  if (hasBegin !== hasEnd) {
+    return {
+      error:
+        'Found a dangling "# >>> pokefix-mcp >>>" marker without its end marker. ' +
+        'Remove the stray marker by hand, then retry — refusing to guess.',
+    };
   }
-  if (inlineRe.test(raw)) {
+  const lines = raw.split(eol);
+  const keyRe = new RegExp(`^${key}:[ \\t]*(#.*)?$`);
+  const inlineRe = new RegExp(`^${key}:[ \\t]*\\S`);
+  const keyIdx = lines.findIndex((line) => keyRe.test(line));
+  if (keyIdx !== -1) {
+    const indent = detectChildIndent(lines, keyIdx);
+    const block = yamlBlockLines(spec, asListItem, indent);
+    lines.splice(keyIdx + 1, 0, YAML_BEGIN, ...block, YAML_END);
+    return lines.join(eol);
+  }
+  if (lines.some((line) => inlineRe.test(line))) {
     return {
       error: `${key} is set inline — add the Pokefix entry manually to keep your file intact.`,
     };
   }
-  const base = raw.trimEnd();
-  return `${base === '' ? '' : `${base}\n\n`}${key}:\n${marked}\n`;
+  // No such key at all: create it at top level.
+  const block = yamlBlockLines(spec, asListItem, 2);
+  const marked = [YAML_BEGIN, ...block, YAML_END].join(eol);
+  const base = raw.trim();
+  return `${base === '' ? '' : `${base}${eol}${eol}`}${key}:${eol}${marked}${eol}`;
 };
 
 const yamlRemove = (raw: string, key: string): string => {
-  const begin = raw.indexOf(YAML_BEGIN);
-  if (begin === -1) {
+  const eol = eolOf(raw);
+  const lines = raw.split(eol);
+  const beginLine = lines.findIndex((line) => line.includes(YAML_BEGIN));
+  if (beginLine === -1) {
     return raw;
   }
-  const endIdx = raw.indexOf(YAML_END, begin);
-  if (endIdx === -1) {
-    return raw;
+  const endLine = lines.findIndex((line, i) => i > beginLine && line.includes(YAML_END));
+  if (endLine === -1) {
+    return raw; // dangling BEGIN — don't guess; leave the file untouched
   }
-  const end = endIdx + YAML_END.length;
-  const lineStart = raw.lastIndexOf('\n', begin) + 1;
-  let lineEnd = raw.indexOf('\n', end);
-  lineEnd = lineEnd === -1 ? raw.length : lineEnd + 1;
-  const out = raw.slice(0, lineStart) + raw.slice(lineEnd);
-  // If the owning top-level key is now childless, drop it — a bare `key:`
+  lines.splice(beginLine, endLine - beginLine + 1);
+  // If the owning TOP-LEVEL key is now childless, drop it — a bare `key:`
   // parses as null and some loaders choke on it.
-  const lines = out.split('\n');
-  const keyIdx = lines.findIndex((line) => line.trim() === `${key}:`);
+  const keyRe = new RegExp(`^${key}:[ \\t]*(#.*)?$`);
+  const keyIdx = lines.findIndex((line) => keyRe.test(line));
   if (keyIdx !== -1) {
     let i = keyIdx + 1;
     let hasChild = false;
@@ -386,19 +469,24 @@ const yamlRemove = (raw: string, key: string): string => {
       lines.splice(keyIdx, 1);
     }
   }
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+  return lines.join(eol).replace(new RegExp(`${eol}{3,}`, 'g'), eol + eol);
 };
 
 const jsonHasEntry = (config: Record<string, unknown>, serversKey: string): boolean => {
   const servers = config[serversKey];
-  return typeof servers === 'object' && servers !== null && SERVER_KEY in servers;
+  return isPlainObject(servers) && SERVER_KEY in servers;
 };
 
 export const isToolAdded = (tool: AgentTool): boolean => {
   if (!fs.existsSync(tool.configPath)) {
     return false;
   }
-  const raw = fs.readFileSync(tool.configPath, 'utf-8');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(tool.configPath, 'utf-8');
+  } catch {
+    return false;
+  }
   if (tool.format === 'toml') {
     return tomlHasEntry(raw, tool.serversKey);
   }
@@ -453,20 +541,24 @@ export const setToolEntry = (
   const spec = bridgeSpec(env);
 
   if (tool.format === 'toml') {
-    const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
-    const next = add
-      ? tomlHasEntry(raw, tool.serversKey)
-        ? raw
-        : tomlAddEntry(raw, tool.serversKey, spec)
-      : tomlRemoveEntry(raw, tool.serversKey);
-    writeAtomic(tool.configPath, next);
-    return stateFor(tool);
+    try {
+      const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
+      const next = add
+        ? tomlHasEntry(raw, tool.serversKey)
+          ? raw
+          : tomlAddEntry(raw, tool.serversKey, spec)
+        : tomlRemoveEntry(raw, tool.serversKey);
+      writeAtomic(tool.configPath, next);
+      return stateFor(tool);
+    } catch (error) {
+      return {error: error instanceof Error ? error.message : String(error)};
+    }
   }
 
   if (tool.format === 'yaml') {
     const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
     if (add) {
-      const result = yamlAdd(raw, tool.serversKey, yamlBlockLines(spec, tool.id === 'continue'));
+      const result = yamlAdd(raw, tool.serversKey, spec, tool.id === 'continue');
       if (typeof result !== 'string') {
         return {error: result.error};
       }
@@ -482,10 +574,13 @@ export const setToolEntry = (
   if (config === null) {
     return {error: `${tool.name}'s config file isn't valid JSON — left untouched.`};
   }
-  const servers =
-    typeof config[tool.serversKey] === 'object' && config[tool.serversKey] !== null
-      ? {...(config[tool.serversKey] as Record<string, unknown>)}
-      : {};
+  const existingKey = config[tool.serversKey];
+  if (existingKey !== undefined && !isPlainObject(existingKey)) {
+    return {
+      error: `${tool.name}'s config has a non-object "${tool.serversKey}" — refusing to overwrite it.`,
+    };
+  }
+  const servers = isPlainObject(existingKey) ? {...existingKey} : {};
   if (add) {
     servers[SERVER_KEY] = tool.entry === 'opencode' ? opencodeEntry(spec) : standardJsonEntry(spec);
   } else {

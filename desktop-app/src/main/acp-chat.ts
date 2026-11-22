@@ -12,6 +12,7 @@ import {ipcMain, type WebContents} from 'electron';
 import {spawn, type ChildProcessWithoutNullStreams} from 'child_process';
 import os from 'os';
 import fs from 'fs';
+import {randomUUID} from 'crypto';
 import {IPC_MAIN_CHANNELS} from '../common/constants';
 import {resolveExecutable} from './agent-runner';
 import {
@@ -54,10 +55,12 @@ interface SessionState {
   agentId: string;
   cwd: string;
   sessionId: string;
+  /** Random per-spawn token; permission replies must echo it so a stale card from a previous session can't answer a fresh prompt. */
+  nonce: string;
   owner: WebContents;
   buffer: string;
   pending: Map<number, PendingRequest>;
-  pendingPermissions: Map<number, () => void>;
+  pendingPermissions: Map<number, {optionIds: Set<string>; timer: NodeJS.Timeout | null}>;
   nextId: number;
   /** Id of the in-flight session/prompt, if any — used by cancel and the UI. */
   activePromptId: number | null;
@@ -76,7 +79,14 @@ const sendTo = (state: SessionState | null, channel: string, payload: unknown): 
 };
 
 const writeLine = (state: SessionState, message: object): void => {
-  state.child.stdin.write(`${JSON.stringify(message)}\n`);
+  try {
+    if (state.child.stdin.destroyed) {
+      return;
+    }
+    state.child.stdin.write(`${JSON.stringify(message)}\n`);
+  } catch (error) {
+    log.warn('[acp] stdin write failed', error);
+  }
 };
 
 const call = (
@@ -115,6 +125,9 @@ const notify = (state: SessionState, method: string, params?: unknown): void => 
 };
 
 const TURN_TIMEOUT_MS = 4 * 60 * 1000;
+const PERMISSION_TIMEOUT_MS = 2 * 60 * 1000;
+/** Drop lines/buffers beyond this — a runaway agent must not eat main-process memory. */
+const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 
 /**
  * Mark the in-flight turn finished: stop the watchdog, free the prompt slot and
@@ -134,6 +147,24 @@ const completeTurn = (state: SessionState, stopReason: string): void => {
   sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, {type: 'turn-complete', stopReason});
 };
 
+const clearPermission = (
+  state: SessionState,
+  requestId: number
+): {optionIds: Set<string>} | undefined => {
+  const pending = state.pendingPermissions.get(requestId);
+  if (!pending) return undefined;
+  if (pending.timer) clearTimeout(pending.timer);
+  state.pendingPermissions.delete(requestId);
+  return pending;
+};
+
+const clearAllPermissions = (state: SessionState): void => {
+  for (const pending of state.pendingPermissions.values()) {
+    if (pending.timer) clearTimeout(pending.timer);
+  }
+  state.pendingPermissions.clear();
+};
+
 const armTurnWatchdog = (state: SessionState): void => {
   if (state.turnWatchdog) clearTimeout(state.turnWatchdog);
   state.turnWatchdog = setTimeout(() => {
@@ -148,6 +179,18 @@ const armTurnWatchdog = (state: SessionState): void => {
 };
 
 const handleLine = (state: SessionState, raw: string): void => {
+  try {
+    handleLineUnsafe(state, raw);
+  } catch (error) {
+    log.error('[acp] dropped malformed agent message', error);
+  }
+};
+
+const handleLineUnsafe = (state: SessionState, raw: string): void => {
+  if (raw.length > MAX_BUFFER_BYTES) {
+    log.warn(`[acp] dropping oversized line (${raw.length} bytes)`);
+    return;
+  }
   const msg = parseAcpLine(raw);
   if (!msg) return;
 
@@ -171,8 +214,31 @@ const handleLine = (state: SessionState, raw: string): void => {
     if (msg.method === 'session/request_permission') {
       const parsed = parsePermissionRequest(msg.params);
       if (parsed) {
-        state.pendingPermissions.set(requestId, () => undefined);
-        sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_PERMISSION, {requestId, ...parsed});
+        armTurnWatchdog(state);
+        const timer = setTimeout(() => {
+          const pending = state.pendingPermissions.get(requestId);
+          if (!pending) return;
+          state.pendingPermissions.delete(requestId);
+          writeLine(state, {
+            jsonrpc: '2.0',
+            id: requestId,
+            result: permissionResponse(null),
+          });
+          sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_PERMISSION, {
+            requestId,
+            nonce: state.nonce,
+            expired: true,
+          });
+        }, PERMISSION_TIMEOUT_MS);
+        state.pendingPermissions.set(requestId, {
+          optionIds: new Set(parsed.options.map((o) => o.optionId)),
+          timer,
+        });
+        sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_PERMISSION, {
+          requestId,
+          nonce: state.nonce,
+          ...parsed,
+        });
         return;
       }
     }
@@ -198,6 +264,8 @@ const handleLine = (state: SessionState, raw: string): void => {
       event.type === 'plan'
     ) {
       state.turnChunkSeen = true;
+      // Long-running tools/streams: keep the watchdog alive while the agent breathes.
+      if (state.activePromptId !== null) armTurnWatchdog(state);
     }
     // Hermes never answers session/prompt — the turn is done when the
     // trailing usage_update lands AFTER actual content was produced.
@@ -219,7 +287,7 @@ export const killAgentChat = (): void => {
     pending.reject(new Error('Chat session closed'));
   }
   state.pending.clear();
-  state.pendingPermissions.clear();
+  clearAllPermissions(state);
   try {
     state.child.kill();
   } catch {
@@ -266,6 +334,7 @@ const spawnSession = async (
     agentId: spec.id,
     cwd,
     sessionId: '',
+    nonce: randomUUID(),
     owner: sender,
     buffer: '',
     pending: new Map(),
@@ -277,8 +346,16 @@ const spawnSession = async (
   };
   current = state;
 
+  child.stdin.on('error', (error) => {
+    log.warn('[acp] stdin error', error);
+  });
   child.stdout.on('data', (chunk: Buffer) => {
     state.buffer += chunk.toString('utf8');
+    if (state.buffer.length > MAX_BUFFER_BYTES) {
+      log.warn('[acp] agent output exceeded buffer cap — dropping buffered bytes');
+      state.buffer = '';
+      return;
+    }
     let index = state.buffer.indexOf('\n');
     while (index !== -1) {
       const line = state.buffer.slice(0, index);
@@ -300,7 +377,7 @@ const spawnSession = async (
       pending.reject(new Error('Agent process exited'));
     }
     state.pending.clear();
-    state.pendingPermissions.clear();
+    clearAllPermissions(state);
     if (current === state) {
       current = null;
     }
@@ -389,13 +466,8 @@ export const initAgentChat = (): void => {
     const state = current;
     if (!state) return {ok: false};
     notify(state, 'session/cancel', {sessionId: state.sessionId});
-    if (state.turnWatchdog) {
-      clearTimeout(state.turnWatchdog);
-      state.turnWatchdog = null;
-    }
-    // The pending prompt may never resolve (e.g. agent wedges); don't let the
-    // UI wedge with it — turn-complete/error will simply re-clear this.
-    state.activePromptId = null;
+    // Free the UI immediately — hermes will not answer session/prompt anyway.
+    completeTurn(state, 'cancelled');
     return {ok: true};
   });
 
@@ -406,14 +478,22 @@ export const initAgentChat = (): void => {
 
   ipcMain.handle(
     IPC_MAIN_CHANNELS.AGENT_CHAT_PERMISSION,
-    (_event, payload: {requestId?: unknown; optionId?: unknown}) => {
+    (_event, payload: {requestId?: unknown; optionId?: unknown; nonce?: unknown}) => {
       const requestId = Number(payload?.requestId);
       const optionId = typeof payload?.optionId === 'string' ? payload.optionId : null;
       const state = current;
-      if (!state || !state.pendingPermissions.has(requestId)) {
+      if (!state || state.nonce !== payload?.nonce) {
         return {ok: false};
       }
-      state.pendingPermissions.delete(requestId);
+      const pending = clearPermission(state, requestId);
+      if (!pending) {
+        return {ok: false};
+      }
+      if (optionId !== null && !pending.optionIds.has(optionId)) {
+        // Answer with a cancelled outcome instead of honouring an option the agent never offered.
+        writeLine(state, {jsonrpc: '2.0', id: requestId, result: permissionResponse(null)});
+        return {ok: false};
+      }
       writeLine(state, {jsonrpc: '2.0', id: requestId, result: permissionResponse(optionId)});
       return {ok: true};
     }

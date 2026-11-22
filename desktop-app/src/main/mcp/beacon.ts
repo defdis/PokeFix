@@ -26,9 +26,14 @@ const stableBridgeEntry = (): string | undefined => {
   fs.mkdirSync(stableDir, {recursive: true});
   [MCP_BRIDGE_FILENAME, 'manifest.json'].forEach((file) => {
     const src = path.join(process.resourcesPath, MCP_BRIDGE_DIR, file);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(stableDir, file));
+    if (!fs.existsSync(src)) {
+      return;
     }
+    // Copy via tmp + rename so a concurrently-reading agent never sees a partial bridge.
+    const dest = path.join(stableDir, file);
+    const tmp = `${dest}.pokefix-${process.pid}.tmp`;
+    fs.copyFileSync(src, tmp);
+    fs.renameSync(tmp, dest);
   });
   return path.join(stableDir, MCP_BRIDGE_FILENAME);
 };
@@ -47,7 +52,10 @@ export const writeMcpBeacon = (mcpPort: number): void => {
     };
     const userDataDir = app.getPath('userData');
     fs.mkdirSync(userDataDir, {recursive: true});
-    fs.writeFileSync(path.join(userDataDir, MCP_BEACON_FILENAME), JSON.stringify(beacon, null, 2));
+    const beaconPath = path.join(userDataDir, MCP_BEACON_FILENAME);
+    const tmp = `${beaconPath}.pokefix-${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(beacon, null, 2));
+    fs.renameSync(tmp, beaconPath);
   } catch (error) {
     console.warn('[mcp] Could not write the app-location beacon:', error);
   }

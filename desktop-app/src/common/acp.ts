@@ -58,26 +58,37 @@ export type AcpChatEvent =
   | {type: 'session-info'; title: string};
 
 const textOf = (content: unknown): string => {
-  if (!content) return '';
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        const t = (item as Record<string, unknown>)?.type;
-        if (t === 'content' && item && typeof item === 'object') {
-          return textOf((item as Record<string, unknown>).content);
-        }
-        return textOf(item);
-      })
-      .filter(Boolean)
-      .join('');
+  // Iterative with a depth cap — agent-controlled input, never trust nesting.
+  const parts: string[] = [];
+  const stack: Array<{value: unknown; depth: number}> = [{value: content, depth: 0}];
+  while (stack.length > 0) {
+    const {value, depth} = stack.pop()!;
+    if (value == null || depth > 16) continue;
+    if (typeof value === 'string') {
+      parts.push(value);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      // preserve order: push reversed
+      for (let i = value.length - 1; i >= 0; i -= 1) {
+        stack.push({value: value[i], depth: depth + 1});
+      }
+      continue;
+    }
+    if (typeof value === 'object') {
+      const rec = value as Record<string, unknown>;
+      if (typeof rec.text === 'string') {
+        parts.push(rec.text);
+        continue;
+      }
+      const inner = rec.type === 'content' ? rec.content : undefined;
+      if (inner !== undefined) {
+        stack.push({value: inner, depth: depth + 1});
+      }
+    }
   }
-  if (typeof content === 'object') {
-    const rec = content as Record<string, unknown>;
-    if (typeof rec.text === 'string') return rec.text;
-    return '';
-  }
-  return '';
+  // Document order is preserved (children are pushed in reverse, then popped).
+  return parts.join('');
 };
 
 /** Map one ACP session/update payload to UI events (may produce 0-1 events). */
