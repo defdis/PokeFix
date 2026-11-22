@@ -82,7 +82,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
-    "@electron/rebuild": "^4.2.0",
+    "@electron/rebuild": "^4.2.1",
     "@iconify-json/bx": "^1.2.3",
     "@iconify-json/carbon": "^1.2.30",
     "@iconify-json/ei": "^1.2.2",
