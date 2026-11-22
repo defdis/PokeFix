@@ -30,6 +30,7 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 - `src/renderer/components/McpBridge/` — исполняет MCP-команды в webviews
 - `src/main/screenshot/` — скриншоты кадров (использовать для аннотаций, не изобретать своё)
 - `src/renderer/components/ToolBar/McpPanel/` — UI-панель MCP (toggle, copy-config)
+- `src/main/local-servers.ts` + `ToolBar/LocalServers/` — кнопка монитора в адресной строке: lsof + HTTP-проба (title) юзерских localhost-сервисов; клик → открыть во всех вьюпортах; IPC `BA_LIST_LOCAL_SERVERS`, кэш 5с, свой 12719/12720 исключены
 - `src/main/preload-webview.ts` (через `.erb` конфиги `webpack.config.preload-webview`) — инъекция в каждый webview — точка для аннотатор-оверлея
 
 ## Work Guidance

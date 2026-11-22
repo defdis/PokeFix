@@ -65,6 +65,7 @@ export const IPC_MAIN_CHANNELS = {
   MCP_LIST_TOOLS: 'mcp-list-tools',
   MCP_SET_TOOL: 'mcp-set-tool',
   BA_PICK_DIRECTORY: 'ba-pick-directory',
+  BA_LIST_LOCAL_SERVERS: 'ba-list-local-servers',
   AGENT_CHAT_AGENTS: 'agent-chat-agents',
   AGENT_CHAT_SPAWN: 'agent-chat-spawn',
   AGENT_CHAT_SEND: 'agent-chat-send',

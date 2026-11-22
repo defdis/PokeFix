@@ -15,6 +15,7 @@ import useKeyboardShortcut, {
 import AuthModal from './AuthModal';
 import SuggestionList from './SuggestionList';
 import Bookmark from './BookmarkButton';
+import LocalServers from '../LocalServers';
 import SitePermissionsDropdown from './SitePermissions';
 import SiteToolsPopover from './SiteToolsPopover';
 import {IconButton} from '../primitives';
@@ -305,6 +306,7 @@ const AddressBar = () => {
             <Icon icon="mdi:home-outline" />
           </IconButton>
           <Bookmark pageTitle={pageTitle} currentAddress={address} />
+          <LocalServers onPick={onEnter} />
         </div>
         <div
           className={`${

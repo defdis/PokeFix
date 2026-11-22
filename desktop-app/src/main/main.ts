@@ -13,6 +13,7 @@ import {app, BrowserWindow, session, shell, ipcMain, dialog} from 'electron';
 import cli from './cli';
 import {IPC_MAIN_CHANNELS, PROTOCOL} from '../common/constants';
 import MenuBuilder from './menu';
+import {listLocalServers} from './local-servers';
 import {resolveHtmlPath} from './util';
 import {
   getBrowserSyncHost,
@@ -156,6 +157,8 @@ const agentEnv = (): AgentEnv => ({
 ipcMain.handle(IPC_MAIN_CHANNELS.MCP_LIST_TOOLS, async () => listAgentTools(agentEnv()));
 
 /** Folder picker for agent working directories (chat panel, annotator). */
+ipcMain.handle(IPC_MAIN_CHANNELS.BA_LIST_LOCAL_SERVERS, () => listLocalServers());
+
 ipcMain.handle(IPC_MAIN_CHANNELS.BA_PICK_DIRECTORY, async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory', 'createDirectory'],
