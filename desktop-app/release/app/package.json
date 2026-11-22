@@ -1,7 +1,7 @@
 {
   "name": "pokefix",
   "version": "0.9.0",
-  "description": "Pokefix \u2014 multi-viewport browser for responsive UI work, with an MCP bridge for AI agents.",
+  "description": "Pokefix — multi-viewport browser for responsive UI work, with an MCP bridge for AI agents.",
   "license": "AGPL-3.0-only",
   "author": {
     "name": "defdis",
