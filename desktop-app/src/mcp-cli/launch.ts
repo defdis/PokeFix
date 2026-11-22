@@ -23,7 +23,7 @@ const defaultDeps: LaunchDeps = {
   bridgeDir: __dirname,
 };
 
-const MAC_BUNDLE_ID = 'app.responsively';
+const MAC_BUNDLE_ID = 'app.pokefix';
 
 /**
  * cli.js ships at <resources>/mcp on mac/win, so walking up from __dirname
@@ -41,11 +41,11 @@ const derivedBinary = (deps: LaunchDeps): string | null => {
     if (appDir === null) {
       return null;
     }
-    const binary = path.join(appDir, 'Contents', 'MacOS', 'ResponsivelyApp');
+    const binary = path.join(appDir, 'Contents', 'MacOS', 'Pokefix');
     return deps.existsFn(binary) ? binary : null;
   }
   const resourcesDir = path.dirname(deps.bridgeDir);
-  const binaryName = deps.platform === 'win32' ? 'ResponsivelyApp.exe' : 'responsively';
+  const binaryName = deps.platform === 'win32' ? 'Pokefix.exe' : 'Pokefix';
   const binary = path.join(path.dirname(resourcesDir), binaryName);
   return deps.existsFn(binary) ? binary : null;
 };
@@ -85,13 +85,13 @@ export const launchApp = async (port: number, deps: LaunchDeps = defaultDeps): P
       return;
     }
     throw new Error(
-      'Could not launch Responsively App. Install it from https://responsively.app and launch it once.'
+      'Could not launch Pokefix. Launch it once (it records its own location) or set RESPONSIVELY_APP_PATH.'
     );
   }
 
   const windowsDefault =
     deps.platform === 'win32' && process.env.LOCALAPPDATA !== undefined
-      ? path.join(process.env.LOCALAPPDATA, 'Programs', 'ResponsivelyApp', 'ResponsivelyApp.exe')
+      ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Pokefix', 'Pokefix.exe')
       : null;
   // Linux ships as an AppImage with no conventional install path — the
   // beacon (written by the app on startup) is the only reliable pointer.
@@ -100,8 +100,8 @@ export const launchApp = async (port: number, deps: LaunchDeps = defaultDeps): P
   );
   if (binary === undefined) {
     throw new Error(
-      'Responsively App binary not found. Launch the app manually once (it records its ' +
-        'location for this bridge), or set RESPONSIVELY_APP_PATH to the install location.'
+      'Pokefix binary not found. Launch the app manually once (it records its location ' +
+        'for this bridge), or set RESPONSIVELY_APP_PATH to the install location.'
     );
   }
   log(`launching ${binary}`);

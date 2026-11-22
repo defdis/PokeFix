@@ -1,18 +1,18 @@
 import parseArgs from 'electron-args';
 
-let binaryName = 'ResponsivelyApp';
+let binaryName = 'Pokefix';
 
 if (process.platform === 'darwin') {
-  binaryName = '/Applications/ResponsivelyApp.app/Contents/MacOS/ResponsivelyApp';
+  binaryName = '/Applications/Pokefix.app/Contents/MacOS/Pokefix';
 }
 
 if (process.platform === 'win32') {
-  binaryName = 'ResponsivelyApp.exe';
+  binaryName = 'Pokefix.exe';
 }
 
 const cli = parseArgs(
   `
-      ResponsivelyApp
+      Pokefix
    
       Usage
         $ ${binaryName} [path]

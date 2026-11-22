@@ -44,8 +44,11 @@ const isDuplicatePopup = (url: string): boolean => {
 export const wireWebviewSecurity = (hostContents: WebContents, deps: WebviewSecurityDeps) => {
   hostContents.on('will-attach-webview', (_event, webPreferences) => {
     webPreferences.nodeIntegration = false;
-    const preload = webPreferences.preload ?? '';
-    if (preload !== '' && !preload.includes('preload-webview')) {
+    // Pin isolation even if a future renderer change injects webpreferences.
+    webPreferences.contextIsolation = true;
+    const preload = (webPreferences.preload ?? '').replace(/\\/g, '/');
+    const preloadName = preload.split('/').pop() ?? '';
+    if (preload !== '' && preloadName !== 'preload-webview.js') {
       log.warn('[webview] blocked unexpected preload script', preload);
       delete webPreferences.preload;
     }

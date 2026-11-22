@@ -39,14 +39,14 @@ export const sendBridgeCommand = <R>(
   const mainWindow = getMainWindow();
   if (mainWindow === null || mainWindow.isDestroyed()) {
     return Promise.reject(
-      new Error('The Responsively App window is not open. Open the app window and retry.')
+      new Error('The Pokefix window is not open. Open the app window and retry.')
     );
   }
   const requestId = randomUUID();
   return new Promise<R>((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingRequests.delete(requestId);
-      reject(new Error(`Responsively did not respond to '${command}' within ${timeoutMs}ms`));
+      reject(new Error(`Pokefix did not respond to '${command}' within ${timeoutMs}ms`));
     }, timeoutMs);
     pendingRequests.set(requestId, {
       resolve: resolve as (result: unknown) => void,

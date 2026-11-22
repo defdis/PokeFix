@@ -76,6 +76,9 @@ export const buildPreloadedState = () => {
       dockPosition: store.get('devtools.dockPosition') ?? 'BOTTOM',
       webViewId: -1,
     },
+    annotator: {
+      isOpen: Boolean(store.get('userPreferences.annotatorOpen')),
+    },
     bookmarks: {
       bookmarks: store.get('bookmarks') ?? [],
     },

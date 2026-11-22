@@ -40,14 +40,18 @@ const McpPanel = () => {
   const [toolError, setToolError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const next = await window.electron.ipcRenderer.invoke<unknown, McpServerStatus>(
-      IPC_MAIN_CHANNELS.MCP_STATUS
-    );
-    setStatus(next);
-    const nextTools = await window.electron.ipcRenderer.invoke<unknown, AgentToolState[]>(
-      IPC_MAIN_CHANNELS.MCP_LIST_TOOLS
-    );
-    setTools(nextTools);
+    try {
+      const next = await window.electron.ipcRenderer.invoke<unknown, McpServerStatus>(
+        IPC_MAIN_CHANNELS.MCP_STATUS
+      );
+      setStatus(next);
+      const nextTools = await window.electron.ipcRenderer.invoke<unknown, AgentToolState[]>(
+        IPC_MAIN_CHANNELS.MCP_LIST_TOOLS
+      );
+      setTools(nextTools);
+    } catch (error) {
+      setToolError('MCP status unavailable — check the app logs.');
+    }
   }, []);
 
   useEffect(() => {
@@ -56,13 +60,29 @@ const McpPanel = () => {
 
   const setTool = async (toolId: string, add: boolean) => {
     setToolError(null);
-    const response = await window.electron.ipcRenderer.invoke<
-      {toolId: string; add: boolean},
-      {tools: AgentToolState[]; result: {error?: string}}
-    >(IPC_MAIN_CHANNELS.MCP_SET_TOOL, {toolId, add});
-    setTools(response.tools);
-    if (response.result?.error != null) {
-      setToolError(response.result.error);
+    if (toolId === 'hermes-webhook' && add) {
+      // The Hermes route is an UNAUTHENTICATED loopback webhook: any local
+      // process that can POST to 127.0.0.1:8644 could steer the agent.
+      // This must never happen silently.
+      const confirmed = window.confirm(
+        'This enables an UNAUTHENTICATED webhook on 127.0.0.1:8644 in your Hermes config.\n\n' +
+          'Any local process could then send annotations to your agent. Proceed only if you understand this.'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    try {
+      const response = await window.electron.ipcRenderer.invoke<
+        {toolId: string; add: boolean},
+        {tools: AgentToolState[]; result: {error?: string}}
+      >(IPC_MAIN_CHANNELS.MCP_SET_TOOL, {toolId, add});
+      setTools(response.tools);
+      if (response.result?.error != null) {
+        setToolError(response.result.error);
+      }
+    } catch (error) {
+      setToolError('Failed to update the agent config — see app logs.');
     }
   };
 
@@ -70,11 +90,15 @@ const McpPanel = () => {
     if (status === null) {
       return;
     }
-    const next = await window.electron.ipcRenderer.invoke<{enabled: boolean}, McpServerStatus>(
-      IPC_MAIN_CHANNELS.MCP_SET_ENABLED,
-      {enabled: !status.enabled}
-    );
-    setStatus(next);
+    try {
+      const next = await window.electron.ipcRenderer.invoke<{enabled: boolean}, McpServerStatus>(
+        IPC_MAIN_CHANNELS.MCP_SET_ENABLED,
+        {enabled: !status.enabled}
+      );
+      setStatus(next);
+    } catch (error) {
+      setToolError('Failed to toggle the MCP server.');
+    }
   };
 
   const copyConfig = async () => {
@@ -171,7 +195,13 @@ const McpPanel = () => {
                   className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white"
                   style={{background: tool.color}}
                 >
-                  <Icon icon={tool.icon} fontSize={13} />
+                  {tool.icon.startsWith('emoji:') ? (
+                    <span className="pointer-events-none text-[13px] leading-none">
+                      {tool.icon.slice(6)}
+                    </span>
+                  ) : (
+                    <Icon icon={tool.icon} fontSize={13} />
+                  )}
                 </span>
                 <span className="text-[13px]">{tool.name}</span>
                 <span className="flex-1" />
@@ -181,7 +211,7 @@ const McpPanel = () => {
                   title={
                     tool.added
                       ? `Added — click to remove from ${tool.name}`
-                      : `Add Responsively MCP to ${tool.name}`
+                      : `Add Pokefix MCP to ${tool.name}`
                   }
                   onClick={() => setTool(tool.id, !tool.added)}
                   className={cx(

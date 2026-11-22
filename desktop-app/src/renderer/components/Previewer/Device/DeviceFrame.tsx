@@ -142,6 +142,8 @@ const DeviceFrame = ({
           /* eslint-disable-next-line react/no-unknown-property */
           preload={`file://${window.responsively.webviewPreloadPath}`}
           data-scale-factor={zoomfactor}
+
+          data-device-name={device.name}
           /* React drops boolean-valued unknown attributes entirely, so this
              must be a string for the attribute to reach the DOM at all.
              (@types/react declares it boolean, which react-dom never renders.) */

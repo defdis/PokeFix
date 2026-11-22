@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Writes the Responsively MCP server into the config files of AI coding
+ * Writes the Pokefix MCP server into the config files of AI coding
  * tools. These files belong to other applications, so every write reads the
  * existing content, changes only our own entry, and saves atomically — an
  * unparseable or unexpected file is left alone rather than overwritten.
@@ -12,7 +12,43 @@ export const SERVER_KEY = 'responsively';
 export const SERVER_COMMAND = 'npx';
 export const SERVER_ARGS = ['-y', '@responsively/mcp'];
 
-export type ConfigFormat = 'json' | 'toml';
+export type ConfigFormat = 'json' | 'toml' | 'yaml';
+
+/**
+ * Hermes config.yaml block appended by the hermes-webhook "tool". YAML text is
+ * appended (not re-dumped) so user comments elsewhere in the file survive.
+ */
+const HERMES_HOOK_BLOCK = [
+  'platforms:',
+  '  webhook:',
+  '    enabled: true',
+  '    extra:',
+  '      host: "127.0.0.1"',
+  '      port: 8644',
+  '      secret: "INSECURE_NO_AUTH"',
+  '      routes:',
+  '        responsively:',
+  '          secret: "INSECURE_NO_AUTH"',
+  '          events: "annotations"',
+  '          deliver: "log"',
+  '          prompt: "Пользователь прислал замечания по UI из Pokefix. payload.markdown и payload.items содержат метки. Забери их и обработай: исправь код и ответь, что сделал."',
+].join('\n');
+
+/**
+ * Marker for our webhook route. The route key sits at a fixed indent (8
+ * spaces) inside the `routes:` map; matching the bare word would also match
+ * unrelated keys/comments that happen to contain 'responsively:'.
+ */
+const HOOK_ROUTE_MARKER_REGEX = /^ {8}responsively:\s*$/m;
+
+const hermesConfigState = (raw: string): 'absent' | 'configured' | 'conflict' => {
+  if (HOOK_ROUTE_MARKER_REGEX.test(raw)) {
+    return 'configured';
+  }
+  // A root-level 'platforms:' key already exists (possibly for other platforms).
+  // Appending ours again would create a duplicate key, so we refuse to guess.
+  return /^platforms:\s*$/m.test(raw) ? 'conflict' : 'absent';
+};
 
 export interface AgentTool {
   id: string;
@@ -111,6 +147,16 @@ export const getAgentTools = (env: AgentEnv): AgentTool[] => {
       configPath: path.join(vsCodeUserDir, 'mcp.json'),
       markerPath: vsCodeUserDir,
     },
+    {
+      id: 'hermes-webhook',
+      name: 'Hermes Agent',
+      icon: 'emoji:🧠',
+      color: '#FFD84D',
+      format: 'yaml',
+      serversKey: 'responsively',
+      configPath: path.join(env.homeDir, '.hermes', 'config.yaml'),
+      markerPath: path.join(env.homeDir, '.hermes'),
+    },
   ];
 };
 
@@ -138,7 +184,7 @@ const readJson = (file: string): Record<string, unknown> | null => {
 /** Write via a temp file so a crash can't truncate someone's config. */
 const writeAtomic = (file: string, contents: string): void => {
   fs.mkdirSync(path.dirname(file), {recursive: true});
-  const tmp = `${file}.responsively.tmp`;
+  const tmp = `${file}.pokefix.tmp`;
   fs.writeFileSync(tmp, contents, 'utf-8');
   fs.renameSync(tmp, file);
 };
@@ -187,6 +233,9 @@ export const isToolAdded = (tool: AgentTool): boolean => {
   if (tool.format === 'toml') {
     return tomlHasEntry(fs.readFileSync(tool.configPath, 'utf-8'), tool.serversKey);
   }
+  if (tool.format === 'yaml') {
+    return HOOK_ROUTE_MARKER_REGEX.test(fs.readFileSync(tool.configPath, 'utf-8'));
+  }
   const config = readJson(tool.configPath);
   return config !== null && jsonHasEntry(config, tool.serversKey);
 };
@@ -210,6 +259,81 @@ export const setToolEntry = (
   const tool = getAgentTools(env).find((t) => t.id === toolId);
   if (tool === undefined || tool.configPath === null) {
     return {error: `Unknown tool: ${toolId}`};
+  }
+
+  if (tool.format === 'yaml') {
+    // Hermes config.yaml — comments belong to the user, so we append/strip text
+    // instead of re-dumping the parsed tree.
+    const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
+    const state = hermesConfigState(raw);
+    if (add) {
+      if (state === 'configured') {
+        return {
+          id: tool.id,
+          name: tool.name,
+          icon: tool.icon,
+          color: tool.color,
+          configPath: tool.configPath,
+          installed: true,
+          added: true,
+        };
+      }
+      if (state === 'conflict') {
+        return {
+          error: `${tool.name}'s config already has a root 'platforms:' key — add the webhook block manually to avoid a duplicate key.`,
+        };
+      }
+      writeAtomic(tool.configPath, `${raw.trimEnd()}\n\n${HERMES_HOOK_BLOCK}\n`);
+    } else {
+      if (state !== 'configured') {
+        return {
+          id: tool.id,
+          name: tool.name,
+          icon: tool.icon,
+          color: tool.color,
+          configPath: tool.configPath,
+          installed: true,
+          added: false,
+        };
+      }
+      // Remove only the route we added; leave the rest of the file untouched.
+      const lines = raw.split('\n');
+      const isOursBlock = raw.includes(HERMES_HOOK_BLOCK);
+      const routeStart = lines.findIndex((line) => line.trim() === 'responsively:');
+      if (routeStart !== -1) {
+        let end = routeStart + 1;
+        while (end < lines.length && lines[end].startsWith('          ')) {
+          end += 1;
+        }
+        let kept = [...lines.slice(0, routeStart), ...lines.slice(end)];
+        // If the whole scaffold was ours (block matched byte-for-byte), drop it too.
+        if (isOursBlock) {
+          const scaffoldStart = lines.findIndex((line) => line.trim() === 'platforms:');
+          let scaffoldEnd = scaffoldStart + 1;
+          while (scaffoldEnd < lines.length && lines[scaffoldEnd].startsWith('  ')) {
+            scaffoldEnd += 1;
+          }
+          kept = [...lines.slice(0, scaffoldStart), ...lines.slice(scaffoldEnd)];
+        }
+        writeAtomic(
+          tool.configPath,
+          `${kept
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd()}\n`
+        );
+      }
+    }
+
+    return {
+      id: tool.id,
+      name: tool.name,
+      icon: tool.icon,
+      color: tool.color,
+      configPath: tool.configPath,
+      installed: true,
+      added: isToolAdded(tool),
+    };
   }
 
   if (tool.format === 'toml') {

@@ -9,7 +9,8 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import {app, BrowserWindow, session, shell, ipcMain} from 'electron';
+import crypto from 'crypto';
+import {app, BrowserWindow, session, shell, ipcMain, net} from 'electron';
 import cli from './cli';
 import {IPC_MAIN_CHANNELS, PROTOCOL} from '../common/constants';
 import MenuBuilder from './menu';
@@ -29,7 +30,7 @@ import {initWebviewStorageManagerHandlers} from './webview-storage-manager';
 import {initNativeFunctionHandlers} from './native-functions';
 import {WebPermissionHandlers} from './web-permissions';
 import {initHttpBasicAuthHandlers} from './http-basic-auth';
-import {initAppMetaHandlers} from './app-meta';
+import {initAppMetaHandlers, isSafeExternalUrl} from './app-meta';
 import {getMcpServerStatus, initMcpServer, setMcpServerEnabled} from './mcp';
 import {listAgentTools, setToolEntry, AgentEnv} from './mcp/agent-config';
 import {openUrl} from './protocol-handler';
@@ -150,6 +151,67 @@ const agentEnv = (): AgentEnv => ({
 });
 
 ipcMain.handle(IPC_MAIN_CHANNELS.MCP_LIST_TOOLS, async () => listAgentTools(agentEnv()));
+
+/**
+ * AnnotatorBar "send to agent": POST made from the main process because the
+ * renderer's browser fetch is subject to CORS — the Hermes webhook gateway
+ * answers OPTIONS preflights with 405, which poisoned the send button red.
+ */
+ipcMain.handle(
+  IPC_MAIN_CHANNELS.BA_SEND_TO_AGENT,
+  async (
+    _event,
+    {url, secret, body}: {url: string; secret: string; body: string}
+  ): Promise<{ok: boolean; status: number | null; error?: string}> => {
+    // The renderer picks the URL — never POST it anywhere but the loopback
+    // webhook, and never sign arbitrary bodies for arbitrary hosts.
+    const MAX_BODY_BYTES = 256 * 1024;
+    const MAX_SECRET_LENGTH = 512;
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return {ok: false, status: null, error: 'Invalid webhook URL'};
+    }
+    const isLoopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(target.hostname);
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      return {ok: false, status: null, error: 'Only http(s) webhook URLs are allowed'};
+    }
+    if (!isLoopback) {
+      return {ok: false, status: null, error: 'Webhook URL must point at localhost'};
+    }
+    if (typeof body !== 'string' || body.length > MAX_BODY_BYTES) {
+      return {ok: false, status: null, error: 'Payload too large'};
+    }
+    if (typeof secret !== 'string' || secret.length > MAX_SECRET_LENGTH) {
+      return {ok: false, status: null, error: 'Invalid secret'};
+    }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-GitHub-Event': 'annotations',
+    };
+    if (secret.length > 0) {
+      const signature = crypto.createHmac('sha256', secret).update(body).digest('hex');
+      headers['X-Hub-Signature-256'] = `sha256=${signature}`;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await net.fetch(target.toString(), {
+        method: 'POST',
+        headers,
+        body,
+        signal: controller.signal,
+      });
+      return {ok: response.ok, status: response.status};
+    } catch (sendError) {
+      log.error('[send-to-agent] failed', sendError);
+      return {ok: false, status: null, error: String(sendError)};
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+);
 
 ipcMain.handle(
   IPC_MAIN_CHANNELS.MCP_SET_TOOL,
@@ -286,7 +348,9 @@ const createWindow = async () => {
   initDevtoolsHandlers(mainWindow);
   wireWebviewSecurity(mainWindow.webContents, {
     openInPreview: (url) => openUrl(url, getMainWindow()),
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: (url) => {
+      if (isSafeExternalUrl(url)) shell.openExternal(url);
+    },
     onShortcut: (channel) => {
       getMainWindow()?.webContents.send(IPC_MAIN_CHANNELS.SHORTCUT_TRIGGERED, channel);
     },
@@ -356,7 +420,11 @@ const createWindow = async () => {
 
   // Open urls in the user's browser
   mainWindow.webContents.setWindowOpenHandler((edata) => {
-    shell.openExternal(edata.url);
+    if (isSafeExternalUrl(edata.url)) {
+      shell.openExternal(edata.url);
+    } else {
+      log.warn('Blocked openExternal for unsafe URL', edata.url);
+    }
     return {action: 'deny'};
   });
 };
@@ -390,9 +458,18 @@ app.on('window-all-closed', () => {
 });
 
 app.on('certificate-error', (event, _, url, __, ___, callback) => {
-  if (url.indexOf(getBrowserSyncHost()) !== -1) {
-    event.preventDefault();
-    return callback(true);
+  // Only the browser-sync companion origin may bypass TLS validation, and
+  // only on an exact host+port match — a substring check would also trust
+  // attacker URLs that merely contain the substring (e.g. in the path).
+  try {
+    const requestUrl = new URL(url);
+    const syncUrl = new URL(`https://${getBrowserSyncHost()}`);
+    if (requestUrl.hostname === syncUrl.hostname && requestUrl.port === syncUrl.port) {
+      event.preventDefault();
+      return callback(true);
+    }
+  } catch {
+    // Unparseable URL — fall through to the user's insecure-connections setting.
   }
   log.info('certificate-error event', url, getBrowserSyncHost());
   return callback(store.get('userPreferences.allowInsecureSSLConnections'));
@@ -401,6 +478,18 @@ app.on('certificate-error', (event, _, url, __, ___, callback) => {
 app
   .whenReady()
   .then(() => {
+    // Dev builds ship the Electron binary, so the dock shows the default icon/name.
+    // Point both at Pokefix (real builds take the icon/name from electron-builder).
+    if (process.platform === 'darwin' && app.dock) {
+      const getDockAssetPath = (...paths: string[]): string =>
+        path.join(__dirname, '../../assets', ...paths);
+      app.setName('Pokefix');
+      try {
+        app.dock.setIcon(getDockAssetPath('icon.png'));
+      } catch (iconError) {
+        log.error('[app-icon]', iconError);
+      }
+    }
     wireSessionOnce();
     appUpdater = new AppUpdater();
     createWindow();

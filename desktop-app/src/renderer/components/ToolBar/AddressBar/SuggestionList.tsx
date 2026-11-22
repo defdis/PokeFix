@@ -57,7 +57,11 @@ const SuggestionList = ({match, onEnter}: Props) => {
     <div className="absolute z-20 flex w-full flex-col items-start rounded-b-lg bg-white pb-2 shadow-lg dark:bg-slate-900">
       {suggestions.map(({title, url}, idx) => (
         <button
-          onClickCapture={() => {
+          onPointerDown={() => {
+            // A classic click here can lose the race with the address input's
+            // blur: the list unmounts ~100 ms after focus leaves the input and
+            // a slow mouse-up never delivers the click. Pointer-down is
+            // delivered regardless of blur order.
             onEnter(url);
           }}
           className={cx(

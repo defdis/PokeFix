@@ -71,7 +71,7 @@ afterEach(async () => {
 });
 
 describe('mcp-cli backend', () => {
-  it('finds a running Responsively backend', async () => {
+  it('finds a running Pokefix backend', async () => {
     const app = await startFakeApp();
     const backend = createBackend({port: app.port});
     const client = await backend.getIfRunning();
@@ -84,7 +84,7 @@ describe('mcp-cli backend', () => {
     expect(await backend.getIfRunning()).toBeNull();
   });
 
-  it('rejects MCP servers that are not Responsively', async () => {
+  it('rejects MCP servers that are not Pokefix', async () => {
     const app = await startFakeApp('someone-else');
     const backend = createBackend({port: app.port});
     expect(await backend.getIfRunning()).toBeNull();

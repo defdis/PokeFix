@@ -8,7 +8,6 @@ import useKeyboardShortcut, {
 } from 'renderer/components/KeyboardShortcutsManager/useKeyboardShortcut';
 import Popover from 'renderer/components/Popover';
 import Notifications from 'renderer/components/Notifications/Notifications';
-import SupportPopover from 'renderer/components/SupportPopover';
 import useLocalStorage from 'renderer/components/useLocalStorage/useLocalStorage';
 import {selectActiveSuite} from 'renderer/store/features/device-manager';
 import {
@@ -195,8 +194,6 @@ const StatusBar = () => {
       >
         <Notifications />
       </Popover>
-
-      <SupportPopover />
 
       <button
         type="button"

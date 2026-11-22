@@ -222,7 +222,7 @@ const schema = {
         properties: {
           saveLocation: {
             type: 'string',
-            default: path.join(homedir(), `Desktop/Responsively-Screenshots`),
+            default: path.join(homedir(), `Desktop/Pokefix-Screenshots`),
           },
         },
         default: {},
@@ -347,8 +347,15 @@ const store = new Store({
 });
 
 // Keys the renderer may touch through the electron-store IPC bridge.
-// windowState is main-process-only.
-const RENDERER_STORE_ROOTS = new Set(Object.keys(schema).filter((key) => key !== 'windowState'));
+// windowState is main-process-only. webPermissions is too: grants there map
+// 1:1 to camera/mic/geolocation approval for any origin, so they are written
+// exclusively by the permission flow in src/main/web-permissions.
+// (userPreferences.allowInsecureSSLConnections stays writable: the renderer
+// hosts its only toggle, and it only loosens TLS for the browser-sync host.)
+const MAIN_PROCESS_ONLY = new Set(['windowState', 'webPermissions']);
+const RENDERER_STORE_ROOTS = new Set(
+  Object.keys(schema).filter((key) => !MAIN_PROCESS_ONLY.has(key))
+);
 
 export const isRendererStoreKey = (property: unknown): property is string =>
   typeof property === 'string' && RENDERER_STORE_ROOTS.has(property.split('.')[0]);

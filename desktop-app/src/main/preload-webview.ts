@@ -1,9 +1,5 @@
-import {ipcRenderer} from 'electron';
+import {contextBridge, ipcRenderer} from 'electron';
 import {IPC_MAIN_CHANNELS} from 'common/constants';
-
-window.onerror = function logError(errorMsg, url, lineNumber) {
-  console.log(`Unhandled error: ${errorMsg} ${url} ${lineNumber}`);
-};
 
 // Scroll/wheel mirroring can fire every frame on every preview — coalesce to
 // one host message per animation frame. Wheel deltas are summed so the total
@@ -186,13 +182,26 @@ interface BaAnnotationItem {
   text: string;
   selector: string;
   feedback: string;
+  /** Key computed styles, only when the settings switch is on. */
+  styles?: string;
+  /** Keyed attributes that let an agent locate the element without searching. */
+  attributes?: string;
+  /** Short outerHTML snapshot (leading whitespace collapsed). */
+  html?: string;
+  /** Document-space bbox: the element is here on the page. */
+  position?: {x: number; y: number; width: number; height: number};
 }
 
 interface BaAnnotationApi {
   active: () => boolean;
   get: () => BaAnnotationItem[];
   clear: () => void;
+  remove: (index: number) => void;
+  configure: (partial: Partial<BaAnnotatorConfig>) => void;
+  setHidden: (hidden: boolean) => void;
+  isHidden: () => boolean;
   count: () => number;
+  edit: (index: number, feedback: string) => void;
 }
 
 const BA_WINDOW_KEY = 'baAnnotationState' as const;
@@ -200,13 +209,52 @@ const BA_WINDOW_KEY = 'baAnnotationState' as const;
 interface BaAnnotationState {
   active: boolean;
   items: BaAnnotationItem[];
+  /** Overlay appearance/data switches — mirrors the MarkAgent settings panel. */
+  config: BaAnnotatorConfig;
+  /** Marks hidden via the AnnotatorBar eye toggle (runtime, not persisted UI). */
+  hidden: boolean;
 }
 
+interface BaAnnotatorConfig {
+  /** Include element classes in the generated selector. */
+  cssClasses: boolean;
+  /** Capture the full element text (else truncated at 80 chars). */
+  fullText: boolean;
+  /** Record key computed styles of the marked element. */
+  computedStyles: boolean;
+  /** AnnotatorBar wipes marks right after Copy as Markdown. */
+  clearAfterCopy: boolean;
+}
+
+const DEFAULT_CONFIG: BaAnnotatorConfig = {
+  cssClasses: true,
+  fullText: true,
+  computedStyles: false,
+  // Opt-in: copying marks should not wipe them unless the user asked for it.
+  clearAfterCopy: false,
+};
+
 const baReadState = (): BaAnnotationState => {
+  const merged = (state: BaAnnotationState): BaAnnotationState => {
+    // Older persisted payloads miss the config keys; hidden stays runtime-only
+    // so that after a reload marks always start visible.
+    const fallback: BaAnnotationState = {
+      active: false,
+      items: [],
+      config: {...DEFAULT_CONFIG},
+      hidden: false,
+    };
+    return {
+      ...fallback,
+      ...state,
+      config: {...DEFAULT_CONFIG, ...(state.config ?? {})},
+      hidden: state.active ? state.hidden : false,
+    };
+  };
   const existing = (window as unknown as Record<string, unknown>)[BA_WINDOW_KEY] as
     BaAnnotationState | undefined;
   if (existing && Array.isArray(existing.items)) {
-    return existing;
+    return merged(existing);
   }
   // Survive page reloads within the same webview session.
   try {
@@ -215,12 +263,12 @@ const baReadState = (): BaAnnotationState => {
     ) as BaAnnotationState | null;
     if (persisted && Array.isArray(persisted.items)) {
       persisted.active = false;
-      return persisted;
+      return merged(persisted);
     }
   } catch {
     // sessionStorage unavailable (sandboxed page) — memory-only mode.
   }
-  return {active: false, items: []};
+  return {active: false, items: [], config: {...DEFAULT_CONFIG}, hidden: false};
 };
 
 const baWriteState = (state: BaAnnotationState) => {
@@ -259,9 +307,11 @@ const baToggleMode = () => {
   const state = baReadState();
   state.active = !state.active;
   baWriteState(state);
+  // Let the host bar mirror the in-guest toggle so it doesn't fight it.
+  ipcRenderer.sendToHost('ba-annotate-toggled', state.active);
   if (state.active) {
     // Hostile pages may clear overlays; ensure the badge exists each toggle-on.
-    baShowToggleBadge({active: true, items: state.items});
+    baShowToggleBadge(state);
     baDrawMarks(state);
   } else {
     baShowToggleBadge(state);
@@ -273,10 +323,16 @@ const baToggleMode = () => {
 
 const baSetEnabled = (enabled: boolean): boolean => {
   const state = baReadState();
+  if (state.active === enabled) {
+    // Idempotent: the host poll re-asserts the mode every tick; no work and no
+    // redraw when nothing changed (after a page reload state resets, so the
+    // first call after a load still arms the mode).
+    return state.active;
+  }
   state.active = enabled;
   baWriteState(state);
   if (state.active) {
-    baShowToggleBadge({active: true, items: state.items});
+    baShowToggleBadge(state);
   } else {
     baShowToggleBadge(state);
     baHidePopover();
@@ -292,23 +348,78 @@ const baHidePopover = () => {
   baPopover = null;
 };
 
+// ---------- DevTools-style hover highlight + picking signal ----------
+// While annotate mode is on and Alt is held, the element under the cursor is
+//outlined like a DevTools inspection; the host bar shows a picking hint.
+const baHoverElement = document.createElement('div');
+baHoverElement.id = 'ba-annotator-hover';
+baHoverElement.style.cssText =
+  'position:absolute;display:none;z-index:2147483645;border-radius:2px;' +
+  'background:rgba(79,140,255,.22);border:2px solid #4f8cff;pointer-events:none;';
+
+let baPicking = false;
+const baSetPicking = (picking: boolean) => {
+  if (baPicking === picking) {
+    return;
+  }
+  baPicking = picking;
+  ipcRenderer.sendToHost('ba-annotate-picking', picking);
+};
+
+const baIsOwnElement = (target: EventTarget | null): boolean =>
+  target instanceof Element &&
+  target.closest('#ba-annotator-popover, #ba-annotator-badge, #ba-annotator-hover') !== null;
+
+const baAltHeld = (event: MouseEvent | KeyboardEvent): boolean =>
+  event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey;
+
+const baHideHover = () => {
+  baHoverElement.style.display = 'none';
+};
+
+const baHoverMove = (event: MouseEvent) => {
+  const state = baReadState();
+  const target = event.target instanceof Element ? event.target : null;
+  if (!state.active || !baAltHeld(event) || !target || baIsOwnElement(target)) {
+    baHideHover();
+    baSetPicking(false);
+    return;
+  }
+  baSetPicking(true);
+  const rect = target.getBoundingClientRect();
+  const style = baHoverElement.style;
+  style.display = 'block';
+  style.left = `${rect.left + window.scrollX}px`;
+  style.top = `${rect.top + window.scrollY}px`;
+  style.width = `${rect.width}px`;
+  style.height = `${rect.height}px`;
+};
+
+const baHoverLeaveWindow = () => {
+  baHideHover();
+  baSetPicking(false);
+};
+
 const baBuildSelector = (element: Element): string => {
+  const config = baReadState().config;
   const parts: string[] = [];
   let current: Element | null = element;
   let depth = 0;
   while (current !== null && current !== document.documentElement && depth < 5) {
     const currentRef: Element = current;
     let part = currentRef.tagName.toLowerCase();
-    if (currentRef.id.length > 0) {
-      const idPart = currentRef.id
-        .split(/[\s,]+/)
-        .filter((c) => /^[\w-]+$/u.test(c))
-        .map((c) => `#${c}`)
-        .join('');
-      if (idPart.length > 0) {
-        parts.unshift(idPart);
-        break;
+    if (config.cssClasses) {
+      const classes = Array.from(currentRef.classList).filter((className) =>
+        /^[\w-]+$/u.test(className)
+      );
+      if (classes.length > 0) {
+        part += '.' + classes.slice(0, 2).join('.');
       }
+    }
+    if (currentRef.id.length > 0 && /^[\w-]+$/u.test(currentRef.id)) {
+      // ids cannot contain whitespace/commas; an unusable one is just skipped.
+      parts.unshift(`#${currentRef.id}`);
+      break;
     }
     const siblings = currentRef.parentElement
       ? Array.from(currentRef.parentElement.children).filter(
@@ -323,11 +434,29 @@ const baBuildSelector = (element: Element): string => {
     current = currentRef.parentElement;
     depth += 1;
   }
-  return parts.join(' >');
+  return parts.join(' > ');
+};
+
+// Never capture what the page can't safely reveal: passwords, one-time codes
+// and password-manager autocomplete hints. Everything else is the user's own
+// data on their own screen, but credentials must never reach markdown exports.
+const FORM_FIELD_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+const isSensitiveField = (element: Element): boolean => {
+  const type = (element.getAttribute('type') ?? '').toLowerCase();
+  const autocomplete = (element.getAttribute('autocomplete') ?? '').toLowerCase();
+  return (
+    type === 'password' ||
+    autocomplete.includes('password') ||
+    autocomplete.includes('one-time-code')
+  );
 };
 
 const baElementText = (element: Element): string => {
+  const config = baReadState().config;
   const htmlElement = element as HTMLElement;
+  if (isSensitiveField(element)) {
+    return '[redacted]';
+  }
   const raw =
     htmlElement instanceof HTMLInputElement || htmlElement instanceof HTMLTextAreaElement
       ? htmlElement.value
@@ -335,12 +464,83 @@ const baElementText = (element: Element): string => {
         element.getAttribute('placeholder') ??
         element.textContent ??
         '');
-  return raw.replace(/\s+/g, ' ').trim().slice(0, 80);
+  return raw
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, config.fullText ? 400 : 80);
+};
+
+const STYLE_KEYS = [
+  'display',
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'lineHeight',
+  'color',
+  'backgroundColor',
+  'borderRadius',
+  'padding',
+  'margin',
+] as const;
+
+const baComputedStyles = (element: Element): string => {
+  const computed = window.getComputedStyle(element);
+  return STYLE_KEYS.map(
+    (key) => `${key.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`)}: ${computed[key]}`
+  ).join('; ');
+};
+
+// Agent-facing anchors: attributes that make the element findable without a
+// search (links, images, form fields), a short markup snapshot and its bbox.
+const BA_ATTRIBUTE_KEYS = [
+  'id',
+  'class',
+  'href',
+  'src',
+  'alt',
+  'title',
+  'name',
+  'type',
+  'placeholder',
+  'value',
+  'role',
+  'aria-label',
+  'data-test',
+  'data-testid',
+] as const;
+
+const baElementAttributes = (element: Element): string =>
+  BA_ATTRIBUTE_KEYS.filter((key) => {
+    if (!element.hasAttribute(key)) {
+      return false;
+    }
+    // Typed values of form fields are not selectors — drop them entirely.
+    // (Password values would leak through `value` and `html` otherwise.)
+    if (key === 'value' && FORM_FIELD_TAGS.has(element.tagName)) {
+      return false;
+    }
+    return true;
+  })
+    .map((key) => `${key}="${element.getAttribute(key)}"`)
+    .join(' ');
+
+const baElementHtml = (element: Element): string => {
+  let html = element.outerHTML.replace(/\s+/gu, ' ').trim();
+  if (FORM_FIELD_TAGS.has(element.tagName) || isSensitiveField(element)) {
+    html = html
+      // Strip value="..." / value='...' (unquoted values have no spaces by HTML rules).
+      .replace(/(\svalue\s*=\s*)"[^"]*"/giu, '$1""')
+      .replace(/(\svalue\s*=\s*)'[^']*'/giu, "$1''")
+      .replace(/(\svalue\s*=\s*)[^\s>]+/giu, '$1""')
+      // <textarea>secret</textarea> carries its value as inner text.
+      .replace(/(<textarea[^>]*>)[\s\S]*?(<\/textarea>)/giu, '$1$2');
+  }
+  return html.slice(0, 300);
 };
 
 const baDrawMarks = (state: BaAnnotationState) => {
   document.querySelectorAll('ba-annotator-mark').forEach((mark) => mark.remove());
-  if (!state.active) {
+  if (!state.active || state.hidden) {
     return;
   }
   state.items.forEach((item) => {
@@ -379,13 +579,26 @@ const baShowPopover = (element: Element, rect: DOMRect, nextIndex: number) => {
   baHidePopover();
   const popover = document.createElement('div');
   popover.id = 'ba-annotator-popover';
+  // Clamp inside the viewport: a mark near the right or bottom edge must
+  // never push the popover out of the visible guest area (it was cropped and
+  // unusable there).
+  const popoverWidth = 240 + 20;
+  const popoverHeight = 170;
+  const popLeft = Math.min(
+    Math.max(4, rect.left + window.scrollX),
+    Math.max(4, window.innerWidth + window.scrollX - popoverWidth)
+  );
+  const popTop = Math.min(
+    rect.bottom + window.scrollY + 6,
+    Math.max(4, window.innerHeight + window.scrollY - popoverHeight)
+  );
   popover.style.cssText =
     'position:absolute;left:' +
-    Math.max(4, rect.left + window.scrollX) +
+    popLeft +
     'px;top:' +
-    (rect.bottom + window.scrollY + 6) +
+    popTop +
     'px;z-index:2147483647;background:#1e1e24;color:#d7dce3;border-radius:10px;' +
-    'box-shadow:0 6px 24px rgba(0,0,0,.5);padding:10px;width:240px;pointer-events:auto;';
+    'box-shadow:0 6px 24px rgba(0,0,0,.5);padding:10px;width:240px;pointer-events:auto;box-sizing:border-box;';
   const title = document.createElement('div');
   title.style.cssText =
     'font:600 11px/1.4 -apple-system,sans-serif;color:#8b94a1;margin-bottom:6px;';
@@ -415,12 +628,26 @@ const baShowPopover = (element: Element, rect: DOMRect, nextIndex: number) => {
   document.documentElement.appendChild(popover);
 
   saveButton.addEventListener('click', () => {
+    const state = baReadState();
     const item: BaAnnotationItem = {
-      index: nextIndex,
+      // Number at save time, not at popover-open time, so the index can't go stale.
+      index: state.items.length + 1,
       tag: element.tagName.toLowerCase(),
       text: baElementText(element),
       selector: baBuildSelector(element),
       feedback: textarea.value.replace(/\s+$/g, '').trim(),
+    };
+    if (state.config.computedStyles) {
+      item.styles = baComputedStyles(element);
+    }
+    item.attributes = baElementAttributes(element);
+    item.html = baElementHtml(element);
+    const box = element.getBoundingClientRect();
+    item.position = {
+      x: Math.round(box.left + window.scrollX),
+      y: Math.round(box.top + window.scrollY),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
     };
     const nextState = baReadState();
     nextState.items.push(item);
@@ -441,21 +668,25 @@ const baAnnotateClick = (event: MouseEvent) => {
   if (!state.active) {
     return;
   }
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  if (target.closest('#ba-annotator-popover, #ba-annotator-badge')) {
+    return;
+  }
+  // Only Alt+click marks an element (user's explicit requirement): a plain
+  // click must keep its native page behavior (navigation, links) and just
+  // close a lingering popover.
   if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
     event.preventDefault();
     event.stopPropagation();
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    if (target.closest('#ba-annotator-popover, #ba-annotator-badge')) {
-      return;
-    }
     const nextIndex = state.items.length + 1;
     const rect = target.getBoundingClientRect();
     baShowPopover(target, rect, nextIndex);
     return;
   }
+  baHidePopover();
 };
 
 const baAnnotatorInit = () => {
@@ -468,17 +699,73 @@ const baAnnotatorInit = () => {
       baWriteState(state);
       baDrawMarks(state);
     },
+    remove: (index: number) => {
+      const state = baReadState();
+      state.items = state.items.filter((item) => item.index !== index);
+      state.items.forEach((item, position) => {
+        item.index = position + 1;
+      });
+      baWriteState(state);
+      baDrawMarks(state);
+    },
+    configure: (partial: Partial<BaAnnotatorConfig>) => {
+      const state = baReadState();
+      const next = {...state.config, ...partial};
+      // No-op when nothing actually changed — the host re-applies config on a
+      // poll, and unconditional writes/redraws would thrash every 1.5s.
+      if (JSON.stringify(next) === JSON.stringify(state.config)) {
+        return;
+      }
+      state.config = next;
+      baWriteState(state);
+      baDrawMarks(state);
+    },
+    setHidden: (hidden: boolean) => {
+      const state = baReadState();
+      if (state.hidden === hidden) {
+        return;
+      }
+      state.hidden = hidden;
+      baWriteState(state);
+      baDrawMarks(state);
+    },
+    isHidden: () => baReadState().hidden,
     count: () => baReadState().items.length,
+    edit: (index: number, feedback: string) => {
+      const state = baReadState();
+      const item = state.items.find((entry) => entry.index === index);
+      if (item) {
+        item.feedback = String(feedback ?? '');
+        baWriteState(state);
+        baDrawMarks(state);
+      }
+    },
   };
-  (window as unknown as Record<string, unknown>).baAnnotationApi = api;
-  // Toolbar button drives every webview uniformly through executeJavaScript
-  // (macOS may swallow the Cmd+Shift+. shortcut before it reaches the guest).
-  (window as unknown as Record<string, unknown>).baAnnotatorSetEnabled = baSetEnabled;
-  (window as unknown as Record<string, unknown>).baAnnotatorToggle = baToggleMode;
+  // contextIsolation keeps this preload in an isolated world: its plain
+  // window.* keys would be invisible to executeJavaScript (which runs in the
+  // main world). contextBridge is the one legal path into the main-world
+  // window object — expose only through it.
+  contextBridge.exposeInMainWorld('baAnnotationApi', api);
+  contextBridge.exposeInMainWorld('baAnnotatorSetEnabled', baSetEnabled);
+  contextBridge.exposeInMainWorld('baAnnotatorToggle', baToggleMode);
 
   window.addEventListener('click', (event) => baAnnotateClick(event as MouseEvent), true);
+  // Preload runs at document_start, where documentElement is still null —
+  // append synchronously only when it exists, otherwise after DOMContentLoaded
+  // (a null-documentElement throw killed init before the mousemove wiring).
+  const attachHoverElement = () => {
+    document.documentElement.appendChild(baHoverElement);
+  };
+  if (document.documentElement != null) {
+    attachHoverElement();
+  } else {
+    window.addEventListener('DOMContentLoaded', attachHoverElement, {once: true});
+  }
+  window.addEventListener('mousemove', baHoverMove, {passive: true});
   window.addEventListener('keydown', (event) => {
-    if (event.metaKey && event.shiftKey && event.key === '.') {
+    // event.code is layout-independent ('.' is ':>' = '.' with Shift on US),
+    // and Ctrl must work too — metaKey alone is a no-op on Linux/Windows.
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'Period') {
       event.preventDefault();
       baToggleMode();
       return;
@@ -486,8 +773,25 @@ const baAnnotatorInit = () => {
     if (event.key === 'Escape') {
       baHidePopover();
     }
+    if (event.key === 'Alt' && baReadState().active) {
+      baSetPicking(true);
+    }
+  });
+  window.addEventListener('keyup', (event) => {
+    if (event.key === 'Alt') {
+      baHideHover();
+      baSetPicking(false);
+    }
+  });
+  document.addEventListener('scroll', baHideHover, {passive: true, capture: true});
+  window.addEventListener('mouseout', (event) => {
+    if (!(event.relatedTarget instanceof Element)) {
+      // Pointer left the guest viewport entirely.
+      baHoverLeaveWindow();
+    }
   });
   window.addEventListener('resize', () => baDrawMarks(baReadState()));
+  window.addEventListener('resize', baHideHover);
 };
 
 baAnnotatorInit();

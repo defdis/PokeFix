@@ -31,6 +31,12 @@ export class AppUpdater {
     if (process.env.CI || process.env.E2E_TEST || !app.isPackaged) {
       return;
     }
+    // Pokefix has no update feed yet: the inherited publish config pointed at
+    // the upstream project's releases, which would "update" Pokefix into
+    // Responsively. Until the fork ships its own feed, do not check at all.
+    // Re-enable once a feed URL is wired into the build config.
+    log.info('[updater] auto-update disabled (no Pokefix update feed configured)');
+    return;
     autoUpdater.checkForUpdatesAndNotify().catch((error) => {
       this.status = 'ERROR';
       this.error = error;

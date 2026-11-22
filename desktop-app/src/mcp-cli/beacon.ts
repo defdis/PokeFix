@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import {DEFAULT_MCP_PORT, MCP_BEACON_FILENAME, MCP_PORT_ENV_VAR, McpBeacon} from '../common/mcp';
 
-const APP_DATA_DIR = 'ResponsivelyApp';
+const APP_DATA_DIR = 'Pokefix';
 
 export const userDataDir = (
   platform: NodeJS.Platform = process.platform,

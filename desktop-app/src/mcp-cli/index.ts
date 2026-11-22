@@ -1,5 +1,5 @@
 /**
- * Responsively App MCP bridge — a stdio MCP server that proxies to the app's
+ * Pokefix MCP bridge — a stdio MCP server that proxies to the app's
  * embedded HTTP MCP server, launching the app on demand.
  *
  * This file is bundled to resources/mcp/cli.js and started via require() by

@@ -258,33 +258,79 @@ const collectViewportAnnotations = async (
   if (!Array.isArray(raw) || raw.length === 0) {
     return;
   }
-  const annotations: McpAnnotation[] = raw.map((item, i) => {
+  const annotations: McpAnnotation[] = [];
+  raw.forEach((item, i) => {
+    if (item === null || typeof item !== 'object') {
+      // Skip malformed entries instead of failing the whole viewport.
+      return;
+    }
     const record = item as Partial<McpAnnotation>;
-    return {
+    const oneLine = (value: unknown): string =>
+      typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+    const position =
+      record.position &&
+      typeof record.position === 'object' &&
+      [record.position.x, record.position.y, record.position.width, record.position.height].every(
+        (n) => typeof n === 'number' && Number.isFinite(n)
+      )
+        ? {
+            x: record.position.x,
+            y: record.position.y,
+            width: record.position.width,
+            height: record.position.height,
+          }
+        : undefined;
+    annotations.push({
       index: typeof record.index === 'number' ? record.index : i + 1,
-      tag: typeof record.tag === 'string' ? record.tag : 'element',
-      text: typeof record.text === 'string' ? record.text : '',
+      tag: typeof record.tag === 'string' && record.tag !== '' ? record.tag : 'element',
+      // Feedback text and markup come from the guest page — treat as untrusted
+      // page content (newlines collapsed so one mark never breaks the block).
+      text: oneLine(record.text),
       selector: typeof record.selector === 'string' ? record.selector : '',
-      feedback: typeof record.feedback === 'string' ? record.feedback : '',
-    };
+      feedback: oneLine(record.feedback),
+      ...(typeof record.styles === 'string' ? {styles: record.styles} : {}),
+      ...(typeof record.attributes === 'string' ? {attributes: record.attributes} : {}),
+      ...(typeof record.html === 'string' ? {html: record.html} : {}),
+      ...(position ? {position} : {}),
+    });
   });
-  const lines: string[] = [];
+  const url = safeGetUrl(webview);
+  const codeSafe = (value: string) => value.replace(/`/g, "'");
+  // Same layout as the copy-to-clipboard export in AnnotatorBar — keep in sync.
+  const lines: string[] = [
+    `For ${device.name} (${device.width}x${device.height})${url ? ` — ${url}` : ''}`,
+    '',
+  ];
   annotations.forEach((annotation, i) => {
     lines.push(`### ${i + 1}. ${annotation.tag} "${annotation.text}"`);
-    lines.push(`Selector: ${annotation.selector}`);
-    lines.push(`Feedback: ${annotation.feedback || '—'}`);
-    if (i < annotations.length - 1) {
-      lines.push('');
+    if (annotation.selector) {
+      lines.push(`Selector: \`${codeSafe(annotation.selector)}\``);
     }
+    if (annotation.position) {
+      lines.push(
+        `Position: x=${annotation.position.x} y=${annotation.position.y} (${annotation.position.width}x${annotation.position.height})`
+      );
+    }
+    if (annotation.attributes) {
+      lines.push(`Attributes: ${annotation.attributes}`);
+    }
+    if (annotation.html) {
+      lines.push(`HTML: \`${codeSafe(annotation.html)}\``);
+    }
+    lines.push(`Feedback: ${annotation.feedback || '—'}`);
+    if (annotation.styles) {
+      lines.push(`Styles: ${annotation.styles}`);
+    }
+    lines.push('');
   });
   const viewport: McpViewportAnnotations = {
     deviceName: device.name,
     width: device.width,
     height: device.height,
-    url: safeGetUrl(webview),
+    url,
     pageTitle,
     annotations,
-    formatted: lines.join('\n'),
+    formatted: lines.join('\n').trimEnd(),
   };
   result.viewports.push(viewport);
 };
@@ -297,24 +343,31 @@ const safeGetUrl = (webview: Electron.WebviewTag): string => {
   }
 };
 
-const clearAllAnnotations = (state: RootState): McpClearAnnotationsResult => {
+const clearAllAnnotations = async (state: RootState): Promise<McpClearAnnotationsResult> => {
   const result: McpClearAnnotationsResult = {cleared: [], skipped: []};
-  getActiveDevices(state).forEach((device) => {
-    const webview = getDeviceWebview(device.name);
-    if (webview === null) {
-      result.skipped.push({deviceName: device.name, reason: 'preview is not mounted'});
-      return;
-    }
-    try {
-      webview.executeJavaScript('window.baAnnotationApi && window.baAnnotationApi.clear()', true);
-      result.cleared.push(device.name);
-    } catch (error) {
-      result.skipped.push({
-        deviceName: device.name,
-        reason: `clear failed: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  });
+  await Promise.all(
+    getActiveDevices(state).map(async (device) => {
+      const webview = getDeviceWebview(device.name);
+      if (webview === null) {
+        result.skipped.push({deviceName: device.name, reason: 'preview is not mounted'});
+        return;
+      }
+      try {
+        // executeJavaScript is async — without await the marks may survive
+        // and the tool would report a clear that never happened.
+        await webview.executeJavaScript(
+          'window.baAnnotationApi && window.baAnnotationApi.clear()',
+          true
+        );
+        result.cleared.push(device.name);
+      } catch (error) {
+        result.skipped.push({
+          deviceName: device.name,
+          reason: `clear failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    })
+  );
   return result;
 };
 

@@ -31,7 +31,7 @@ const TitleBar = () => {
 
   // Full context in every mode: app — site — page. In presentation this is
   // the one piece of chrome that stays up.
-  const titleText = ['Responsively', domainOf(address), pageTitle === '' ? null : pageTitle]
+  const titleText = ['Pokefix', domainOf(address), pageTitle === '' ? null : pageTitle]
     .filter(Boolean)
     .join(' — ');
 

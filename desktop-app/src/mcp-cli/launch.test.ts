@@ -4,8 +4,8 @@ import {describe, expect, it, vi} from 'vitest';
 import {McpBeacon} from '../common/mcp';
 import {launchApp, LaunchDeps} from './launch';
 
-const MAC_BRIDGE_DIR = '/Applications/ResponsivelyApp.app/Contents/Resources/mcp';
-const MAC_BINARY = '/Applications/ResponsivelyApp.app/Contents/MacOS/ResponsivelyApp';
+const MAC_BRIDGE_DIR = '/Applications/Pokefix.app/Contents/Resources/mcp';
+const MAC_BINARY = '/Applications/Pokefix.app/Contents/MacOS/Pokefix';
 
 const beacon = (binaryPath: string): McpBeacon => ({
   binaryPath,
@@ -41,7 +41,7 @@ describe('mcp-cli launch', () => {
   it('darwin default port launches via LaunchServices bundle id', async () => {
     const {deps, spawned, opened} = makeDeps({});
     await launchApp(12720, deps);
-    expect(opened).toEqual([['-b', 'app.responsively']]);
+    expect(opened).toEqual([['-b', 'app.pokefix']]);
     expect(spawned).toHaveLength(0);
   });
 
@@ -56,7 +56,7 @@ describe('mcp-cli launch', () => {
   });
 
   it('windows launches the beacon binary detached', async () => {
-    const binary = 'C:\\Somewhere\\ResponsivelyApp.exe';
+    const binary = 'C:\\Somewhere\\Pokefix.exe';
     const {deps, spawned} = makeDeps({
       platform: 'win32',
       bridgeDir: 'C:\\Somewhere\\resources\\mcp',
@@ -70,10 +70,10 @@ describe('mcp-cli launch', () => {
   });
 
   it('linux launches the beacon AppImage path', async () => {
-    const appImage = '/home/dev/Apps/Responsively.AppImage';
+    const appImage = '/home/dev/Apps/Pokefix.AppImage';
     const {deps, spawned} = makeDeps({
       platform: 'linux',
-      bridgeDir: '/home/dev/.config/ResponsivelyApp/mcp',
+      bridgeDir: '/home/dev/.config/Pokefix/mcp',
       beacon: () => beacon(appImage),
       existsFn: (p) => p === appImage,
     });
@@ -88,7 +88,7 @@ describe('mcp-cli launch', () => {
   });
 
   it('darwin falls back to opening the derived .app when bundle id fails', async () => {
-    const appDir = '/Users/dev/Applications/ResponsivelyApp.app';
+    const appDir = '/Users/dev/Applications/Pokefix.app';
     const {deps, opened} = makeDeps({
       bridgeDir: path.join(appDir, 'Contents', 'Resources', 'mcp'),
       existsFn: (p) => p === appDir,
@@ -100,6 +100,6 @@ describe('mcp-cli launch', () => {
     });
     const {opened: openedCalls} = {opened};
     await launchApp(12720, deps);
-    expect(openedCalls).toEqual([['-b', 'app.responsively'], [appDir]]);
+    expect(openedCalls).toEqual([['-b', 'app.pokefix'], [appDir]]);
   });
 });

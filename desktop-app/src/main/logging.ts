@@ -3,7 +3,7 @@ import log from 'electron-log';
 
 /**
  * Central logging + crash capture for the main process. File transport lands
- * in the platform log directory (~/Library/Logs/ResponsivelyApp on macOS), so
+ * in the platform log directory (~/Library/Logs/Pokefix on macOS), so
  * field issues finally leave a trace.
  */
 export const initLogging = () => {

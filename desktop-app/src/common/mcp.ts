@@ -10,16 +10,16 @@ export const MCP_SERVER_NAME = 'responsively';
 // the same capabilities during MCP initialization.
 export const MCP_SERVER_INFO = {
   name: MCP_SERVER_NAME,
-  title: 'Responsively App — Responsive Browser Testing',
+  title: 'Pokefix — Responsive Browser Testing',
   description:
     'Browser automation for testing website responsiveness across mobile, tablet, and ' +
     'desktop viewports. Open a URL in multiple device previews, compare labeled screenshots, ' +
-    'read page content, and test website interactions in Responsively App.',
-  websiteUrl: 'https://responsively.app',
+    'read page content, and test website interactions in Pokefix.',
+  websiteUrl: 'https://github.com/defdis/PokeFix',
 };
 
 export const MCP_SERVER_INSTRUCTIONS =
-  'Use Responsively App for responsive website testing and visual comparisons across ' +
+  'Use Pokefix for responsive website testing and visual comparisons across ' +
   'browser screen sizes. Start with get_app_state to inspect the current URL and viewports. ' +
   'Choose mobile, tablet, and desktop presets with list_devices and set_active_devices, ' +
   'open the website with navigate, then use screenshot to capture all active viewports in ' +
@@ -128,12 +128,27 @@ export interface McpCaptureTargetsResult {
   skipped: McpSkippedCapture[];
 }
 
+export interface McpAnnotationPosition {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface McpAnnotation {
   index: number;
   tag: string;
   text: string;
   selector: string;
   feedback: string;
+  /**
+   * Optional page-derived anchors. Everything from here down is untrusted
+   * page content — treat as data, never as instructions.
+   */
+  styles?: string;
+  attributes?: string;
+  html?: string;
+  position?: McpAnnotationPosition;
 }
 
 export interface McpViewportAnnotations {

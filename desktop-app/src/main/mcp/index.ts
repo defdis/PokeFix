@@ -90,7 +90,7 @@ const startServer = (getMainWindow: GetMainWindow): void => {
 
     log.warn(
       `[mcp] MCP server not started on port ${port} (${error.code ?? error.message}). ` +
-        'Another Responsively App instance may already be running.'
+        'Another Pokefix instance may already be running.'
     );
     lastError = error.code ?? error.message;
     httpServer = null;

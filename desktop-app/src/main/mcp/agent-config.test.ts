@@ -28,7 +28,7 @@ afterEach(() => {
 describe('listAgentTools', () => {
   it('reports tools as not installed when nothing is on disk', () => {
     const tools = listAgentTools(env());
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
     expect(tools.every((t) => !t.installed)).toBe(true);
     expect(tools.every((t) => !t.added)).toBe(true);
   });

@@ -29,12 +29,21 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 
 - Новые MCP-инструменты: сначала `toolDefs.ts` (только zod), затем `tools.ts`, потом `renderer/McpBridge` для выполнения в webview; НЕ импортировать electron в toolDefs.ts (ломает generate-mcp-manifest)
 - После каждого существенного изменения — DOX pass (обновить этот файл/родителя)
-- Формат экспорта аннотаций — как в существующем pipeline фидбеков юзера: URL, Viewport, список `### 1. <tag> "<text>" / Selector ... / Feedback ...`
+- Формат экспорта аннотаций — единый и в MCP (`get_annotations`), и в clipboard-экспорте AnnotatorBar: URL, Viewport, список `### 1. <tag> "<text>" / Selector ... / Feedback ...` (плюс Position/Attributes/HTML/Styles при наличии). Текст/атрибуты/HTML — недоверенный контент страницы: newline'ы коллапсить, backtick'и экранировать
+- Чувствительные данные НЕ собираем: password/one-time-code инпуты → `[redacted]`, `value` у form-элементов не экспортируется ни в одной ветке экспорта
+
+## Security Invariants
+
+- `will-attach-webview`: `nodeIntegration=false`, `contextIsolation=true` (пиннуть явно), preload только с базовым именем `preload-webview.js`
+- Renderer store bridge: `webPermissions` и `windowState` renderer'у НЕдоступны на запись (main-only); `userPreferences.allowInsecureSSLConnections` сознательно оставлен renderer-writable (есть UI-тогл)
+- `BA_SEND_TO_AGENT`: только loopback (127.0.0.1/localhost/::1), только http/https, лимиты тела/секрета; подпись HMAC в main-процессе
+- In-guest ответы страницы (текст, HTML, атрибуты) считать недоверенными везде, где рендерятся или экспортируются
 
 ## Verification
 
 - После изменений: `yarn lint && yarn typecheck && yarn test`
 - Ручной smoke: `yarn start` → открыть URL → RPC initialize на `127.0.0.1:12720` → 200
+- Release-сборка (unsigned): `yarn package` → артефакт в `release/build/` (productName Pokefix, appId `app.pokefix`; нужна иконка 1024 PNG в assets)
 
 ## Child DOX Index
 

@@ -9,8 +9,9 @@ import {
   setRotate,
 } from 'renderer/store/features/renderer';
 import {setDevtoolsClose, selectIsDevtoolsOpen} from 'renderer/store/features/devtools';
+import {setAnnotatorOpen, selectIsAnnotatorOpen} from 'renderer/store/features/annotator';
 import {Icon} from '@iconify/react';
-import {useCallback, useState} from 'react';
+import {useCallback} from 'react';
 import {ScreenshotAllArgs} from 'main/screenshot';
 import {selectActiveSuite} from 'renderer/store/features/device-manager';
 import {getDevicesMap} from 'common/deviceList';
@@ -41,10 +42,12 @@ const ToolBar = () => {
   const activeSuite = useSelector(selectActiveSuite);
   const dispatch = useDispatch();
   const playShutter = useShutterSound();
-  const [isAnnotating, setIsAnnotating] = useState(false);
+  const isAnnotating = useSelector(selectIsAnnotatorOpen);
 
   // Annotate mode is forced ON or OFF in every mounted webview (not toggled,
   // so previews never desync); macOS may swallow the in-webview shortcut.
+  // Previews whose guest predates the annotator (no API) need a reload to
+  // arm it — never reload silently: unsaved page state would be lost.
   const handleAnnotateToggle = async () => {
     const next = !isAnnotating;
     if (next && isInspecting) {
@@ -53,27 +56,55 @@ const ToolBar = () => {
       dispatch(setIsInspecting(false));
     }
     const webViews = Array.from(document.querySelectorAll<Electron.WebviewTag>('webView'));
+
     if (next) {
-      for (const webview of webViews) {
-        const hasApi = await webview
-          .executeJavaScript('Boolean(window.baAnnotatorSetEnabled)', true)
-          .catch(() => false);
-        if (!hasApi) {
-          // The annotator preload injects on the next page load — reload the
-          // preview so pages opened before the last rebuild get the overlay.
-          webview.reload();
-          await new Promise<void>((resolve) => {
-            const onLoaded = () => {
-              webview.removeEventListener('did-finish-load', onLoaded);
-              resolve();
-            };
-            webview.addEventListener('did-finish-load', onLoaded);
-            setTimeout(() => {
-              webview.removeEventListener('did-finish-load', onLoaded);
-              resolve();
-            }, 8000);
-          });
+      const missing: Electron.WebviewTag[] = [];
+      await Promise.all(
+        webViews.map(async (webview) => {
+          let hasApi = false;
+          try {
+            hasApi = await webview
+              .executeJavaScript('Boolean(window.baAnnotatorSetEnabled)', true)
+              .catch(() => false);
+          } catch {
+            hasApi = false;
+          }
+          if (!hasApi) {
+            missing.push(webview);
+          }
+        })
+      );
+      if (missing.length > 0) {
+        const proceed = window.confirm(
+          `${missing.length} preview(s) were opened before Annotate was ready and need a reload to enable it.\n\n` +
+            'Reload now? Any unsaved page state (forms, editors) will be lost.'
+        );
+        if (!proceed) {
+          return;
         }
+        await Promise.all(
+          missing.map(
+            (webview) =>
+              new Promise<void>((resolve) => {
+                const onLoaded = () => {
+                  window.clearTimeout(timer);
+                  webview.removeEventListener('did-finish-load', onLoaded);
+                  resolve();
+                };
+                const timer = window.setTimeout(() => {
+                  webview.removeEventListener('did-finish-load', onLoaded);
+                  resolve();
+                }, 8000);
+                webview.addEventListener('did-finish-load', onLoaded);
+                try {
+                  webview.reload();
+                } catch {
+                  window.clearTimeout(timer);
+                  resolve();
+                }
+              })
+          )
+        );
       }
     }
     webViews.forEach((webview) => {
@@ -84,7 +115,7 @@ const ToolBar = () => {
         )
         .catch(() => undefined);
     });
-    setIsAnnotating(next);
+    dispatch(setAnnotatorOpen(next));
   };
 
   const closeDevtoolsPanel = useCallback(() => {
@@ -109,7 +140,7 @@ const ToolBar = () => {
           )
           .catch(() => undefined);
       });
-      setIsAnnotating(false);
+      dispatch(setAnnotatorOpen(false));
     }
     if (!next && isDevtoolsOpen) {
       // Turning inspect off while the devtools panel is showing closes the
@@ -193,7 +224,7 @@ const ToolBar = () => {
           Rotate
         </ToolbarAction>
         <ToolbarAction
-          onClick={() => dispatch(setIsInspecting(!isInspecting))}
+          onClick={handleInspectShortcut}
           isActive={isInspecting}
           title="Inspect Elements"
         >

@@ -53,15 +53,15 @@ export default class MenuBuilder {
 
   buildDarwinTemplate(): MenuItemConstructorOptions[] {
     const subMenuAbout: DarwinMenuItemConstructorOptions = {
-      label: 'ResponsivelyApp',
+      label: 'Pokefix',
       submenu: [
         {
-          label: 'About ResponsivelyApp',
+          label: 'About Pokefix',
           selector: 'orderFrontStandardAboutPanel:',
         },
         {type: 'separator'},
         {
-          label: 'Hide ResponsivelyApp',
+          label: 'Hide Pokefix',
           accelerator: 'Command+H',
           selector: 'hide:',
         },

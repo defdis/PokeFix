@@ -27,35 +27,15 @@ export const subMenuHelp = (
     label: 'Help',
     submenu: [
       {
-        label: 'Learn More',
+        label: 'Repository',
         click() {
-          shell.openExternal('https://responsively.app');
+          shell.openExternal('https://github.com/defdis/PokeFix');
         },
       },
       {
-        label: 'Open Source',
+        label: 'Report an Issue',
         click() {
-          shell.openExternal('https://github.com/responsively-org/responsively-app');
-        },
-      },
-      {
-        label: 'Join Discord',
-        click() {
-          shell.openExternal('https://responsively.app/join-discord/');
-        },
-      },
-      {
-        label: 'Search Issues',
-        click() {
-          shell.openExternal('https://github.com/responsively-org/responsively-app/issues');
-        },
-      },
-      {
-        label: 'Sponsor Responsively',
-        click() {
-          shell.openExternal(
-            'https://responsively.app/sponsor?utm_source=app&utm_medium=menu&utm_campaign=sponsor'
-          );
+          shell.openExternal('https://github.com/defdis/PokeFix/issues');
         },
       },
       {

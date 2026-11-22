@@ -75,7 +75,7 @@ export const SettingsContent = ({onClose}: Props) => {
           </p>
         )}
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Opened by the Home button and when Responsively starts.
+          Opened by the Home button and when Pokefix starts.
         </p>
       </div>
 

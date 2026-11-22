@@ -7,7 +7,7 @@ export const downloadFile = <T extends Record<string, unknown>>(fileData: T) => 
   const link = document.createElement('a');
 
   link.href = url;
-  link.download = `responsively_backup_${new Date().toLocaleDateString()}.json`;
+  link.download = `pokefix_backup_${new Date().toLocaleDateString()}.json`;
 
   document.body.appendChild(link);
   link.click();

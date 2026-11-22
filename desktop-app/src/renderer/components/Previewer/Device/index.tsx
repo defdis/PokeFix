@@ -1,6 +1,7 @@
 import {PREVIEW_LAYOUTS} from 'common/constants';
 import {Device as IDevice} from 'common/deviceList';
 import {CONTEXT_MENUS} from 'main/webview-context-menu/common';
+import {webViewPubSub} from 'renderer/lib/pubsub';
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useDispatch, useSelector} from 'react-redux';
 import {
@@ -181,6 +182,12 @@ const Device = ({isPrimary, device, setIndividualDevice}: Props) => {
           x: rect.left + (x / webview.offsetWidth) * rect.width,
           y: rect.top + (y / webview.offsetHeight) * rect.height,
         });
+      }
+      if (e.channel === 'ba-annotate-picking') {
+        webViewPubSub.publish('ba-annotate-picking', e.args[0] === true);
+      }
+      if (e.channel === 'ba-annotate-toggled') {
+        webViewPubSub.publish('ba-annotate-toggled', e.args[0] === true);
       }
       if (e.channel === 'context-menu-command') {
         const {command, arg} = e.args[0];

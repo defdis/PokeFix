@@ -3,15 +3,6 @@ import {useSelector} from 'react-redux';
 import {IPC_MAIN_CHANNELS, Notification as NotificationType} from 'common/constants';
 import {selectNotifications} from 'renderer/store/features/renderer';
 
-export const SPONSOR_URL_BASE =
-  'https://responsively.app/sponsor?utm_source=app&utm_medium=app-banner&utm_campaign=sponsor';
-
-export const openSponsorPage = (utmTerm: string) => {
-  window.electron.ipcRenderer.sendMessage(IPC_MAIN_CHANNELS.OPEN_EXTERNAL, {
-    url: `${SPONSOR_URL_BASE}&utm_term=${utmTerm}`,
-  });
-};
-
 /** Release highlights shown in the bell panel (Hybrid Studio design). */
 const WHATS_NEW: Array<{icon: string; title: string; body: string; when: string}> = [
   {
@@ -86,18 +77,6 @@ const Notifications = () => {
       {WHATS_NEW.map((item) => (
         <Row key={item.title} {...item} />
       ))}
-      <div className="mt-[2px] flex items-center gap-2 rounded-lg bg-heart-soft px-[10px] py-2">
-        <Icon icon="lucide:heart" fontSize={13} className="shrink-0 text-heart" />
-        <span className="text-[11.5px] text-fg">Enjoying Responsively?</span>
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => openSponsorPage('notifications-panel')}
-          className="h-6 rounded-full border border-heart px-[10px] text-[11px] font-bold text-heart transition-colors hover:bg-heart-soft focus:outline-none"
-        >
-          <span className="pointer-events-none contents">Sponsor</span>
-        </button>
-      </div>
     </div>
   );
 };

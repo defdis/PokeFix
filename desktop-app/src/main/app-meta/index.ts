@@ -13,7 +13,7 @@ export interface AppMetaResponse {
 
 const EXTERNAL_PROTOCOLS = ['http:', 'https:', 'mailto:'];
 
-const isSafeExternalUrl = (url: unknown): url is string => {
+export const isSafeExternalUrl = (url: unknown): url is string => {
   if (typeof url !== 'string') {
     return false;
   }

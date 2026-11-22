@@ -21,6 +21,7 @@ import {
   resetCanvasPositions,
 } from './features/device-manager';
 import {setDockPosition} from './features/devtools';
+import {setAnnotatorOpen} from './features/annotator';
 import {
   setAddress,
   setLayout,
@@ -60,6 +61,13 @@ startListening({
   actionCreator: setDockPosition,
   effect: (action) => {
     window.electron.store.set('devtools.dockPosition', action.payload);
+  },
+});
+
+startListening({
+  actionCreator: setAnnotatorOpen,
+  effect: (action) => {
+    window.electron.store.set('userPreferences.annotatorOpen', action.payload);
   },
 });
 

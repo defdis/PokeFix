@@ -60,7 +60,7 @@ export const createBackend = (options: BackendOptions) => {
     try {
       await withTimeout(client.connect(transport), probeTimeoutMs);
       if (client.getServerVersion()?.name !== MCP_SERVER_NAME) {
-        log(`port ${port} answered MCP but is not Responsively App — ignoring it`);
+        log(`port ${port} answered MCP but is not Pokefix — ignoring it`);
         await client.close();
         return null;
       }
@@ -86,7 +86,7 @@ export const createBackend = (options: BackendOptions) => {
     }
     if (launching === null) {
       launching = (async () => {
-        log(`Responsively App is not running — launching it (port ${port})`);
+        log(`Pokefix is not running — launching it (port ${port})`);
         await launcher(port);
         const deadline = Date.now() + launchTimeoutMs;
         while (Date.now() < deadline) {
@@ -99,7 +99,7 @@ export const createBackend = (options: BackendOptions) => {
           await sleep(pollIntervalMs);
         }
         throw new Error(
-          `Launched Responsively App but 127.0.0.1:${port}/mcp did not become reachable within ` +
+          `Launched Pokefix but 127.0.0.1:${port}/mcp did not become reachable within ` +
             `${Math.round(
               launchTimeoutMs / 1000
             )}s. Another instance may already be running on a ` +
