@@ -196,12 +196,36 @@ export const registerTools = (server: McpServer, getMainWindow: GetMainWindow) =
     }
   });
 
-  server.registerTool('get_annotations', toolDefs.get_annotations, async () => {
+  server.registerTool('get_annotations', toolDefs.get_annotations, async ({clear}) => {
     try {
       const result = await sendBridgeCommand<McpAnnotationsResult>(
         getMainWindow,
         'get-annotations'
       );
+      // Consume-on-read: the agent took the marks, so clear them from every
+      // viewport unless the caller explicitly opted out (clear === false).
+      let clearNote = '';
+      if (clear !== false && result.viewports.length > 0) {
+        try {
+          const cleared = await sendBridgeCommand<McpClearAnnotationsResult>(
+            getMainWindow,
+            'clear-annotations'
+          );
+          clearNote =
+            cleared.cleared.length > 0
+              ? `\n\nMarks cleared in: ${cleared.cleared.join(', ')}.`
+              : '\n\nMarks could not be cleared in any viewport.';
+          if (cleared.skipped.length > 0) {
+            clearNote += ` Skipped: ${cleared.skipped
+              .map((s) => `${s.deviceName} (${s.reason})`)
+              .join(', ')}.`;
+          }
+        } catch (error) {
+          clearNote = `\n\nNOTE: could not auto-clear marks: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+        }
+      }
       if (result.viewports.length === 0) {
         const skippedNote =
           result.skipped.length > 0
@@ -225,7 +249,7 @@ export const registerTools = (server: McpServer, getMainWindow: GetMainWindow) =
           `Skipped viewports: ${result.skipped.map((s) => `${s.deviceName} (${s.reason})`).join('; ')}`
         );
       }
-      return {content: [{type: 'text', text: lines.join('\n')}]};
+      return {content: [{type: 'text', text: lines.join('\n') + clearNote}]};
     } catch (error) {
       return errorResult(error);
     }

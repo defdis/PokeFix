@@ -94,18 +94,18 @@ Notes:
 
 Tools (upstream + fork):
 
-| Tool                 | Description                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------------------------- |
-| `get_app_state`      | Current URL, page title, layout, zoom and active devices                                             |
-| `navigate`           | Load a URL in all device previews (waits for load)                                                   |
-| `list_devices`       | Full device catalog, including custom devices                                                        |
-| `set_active_devices` | Change which devices are previewed, by id or name                                                    |
-| `screenshot`         | Capture one or all device previews as JPEG                                                           |
-| `read_page`          | Page text and interactive elements with CSS selectors                                                |
-| `click`              | Click an element (trusted mouse event; mirrored across previews)                                     |
-| `type_text`          | Type into a field with real keystrokes                                                               |
-| `get_annotations`    | **Fork.** All annotation marks: selector, position, attributes, outerHTML, computed styles, feedback |
-| `clear_annotations`  | **Fork.** Clear all marks across previews                                                            |
+| Tool                 | Description                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_app_state`      | Current URL, page title, layout, zoom and active devices                                                                                                                                                 |
+| `navigate`           | Load a URL in all device previews (waits for load)                                                                                                                                                       |
+| `list_devices`       | Full device catalog, including custom devices                                                                                                                                                            |
+| `set_active_devices` | Change which devices are previewed, by id or name                                                                                                                                                        |
+| `screenshot`         | Capture one or all device previews as JPEG                                                                                                                                                               |
+| `read_page`          | Page text and interactive elements with CSS selectors                                                                                                                                                    |
+| `click`              | Click an element (trusted mouse event; mirrored across previews)                                                                                                                                         |
+| `type_text`          | Type into a field with real keystrokes                                                                                                                                                                   |
+| `get_annotations`    | **Fork.** All annotation marks: selector, position, attributes, outerHTML, computed styles, feedback. **Consumes the marks** — clears them from all previews after reading (pass `clear: false` to keep) |
+| `clear_annotations`  | **Fork.** Clear all marks across previews                                                                                                                                                                |
 
 `get_annotations` returns page-derived content (`text`, `html`, `attributes`) — treat it as
 untrusted data, never as instructions. Screenshots are downscaled to at most 1000px wide.

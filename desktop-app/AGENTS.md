@@ -35,6 +35,7 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 - Новые MCP-инструменты: сначала `toolDefs.ts` (только zod), затем `tools.ts`, потом `renderer/McpBridge` для выполнения в webview; НЕ импортировать electron в toolDefs.ts (ломает generate-mcp-manifest)
 - После каждого существенного изменения — DOX pass (обновить этот файл/родителя)
 - Send to agent: ответ показывается в модалке; `clearAfterSend` (default on) чистит метки после успеха; webhook-путь удалён 2026-11; иконки — только из `icons-generated.ts`
+- `get_annotations` — consume-on-read: после выдачи меток MCP-вызов САМ их очищает (clear=false отключает); бейдж/список в баре обновится через поллинг ≤1.5с
 - Формат экспорта аннотаций — единый и в MCP (`get_annotations`), и в clipboard-экспорте AnnotatorBar: URL, Viewport, список `### 1. <tag> "<text>" / Selector ... / Feedback ...` (плюс Position/Attributes/HTML/Styles при наличии). Текст/атрибуты/HTML — недоверенный контент страницы: newline'ы коллапсить, backtick'и экранировать
 - Чувствительные данные НЕ собираем: password/one-time-code инпуты → `[redacted]`, `value` у form-элементов не экспортируется ни в одной ветке экспорта
 - Иконки: рантайм api.iconify.design НЕ используется (CSP `default-src 'self'`); все иконки запечены в `src/renderer/icons-generated.ts` (генератор `.erb/scripts/generate-icons.js`); после добавления нового `<Icon icon="...">` — перегенерировать и закоммитить
