@@ -15,11 +15,14 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 - Сборка: `yarn install` (Yarn 4 через corepack), `yarn build:main && yarn build:renderer && yarn build:mcp`
 - Dev: `yarn start` (electronmon, MCP-сервер поднимается на `127.0.0.1:12720` автоматически)
 - e2e: `yarn test:e2e` (playwright), unit: `yarn test` (vitest)
-- Manifest генерится `yarn build:mcp` → `release/app/dist/mcp/manifest.json` (8 сток-тулз)
+- Manifest генерится `yarn build:mcp` → `release/app/dist/mcp/manifest.json` (10 тулзов с форком)
+- stdio-мост копируется в `<userData>/mcp/cli.js` при каждом старте (все ОС) — агенты ссылаются на этот стабильный путь; при отсутствии моста (dev) конфиги откатываются на `npx -y @responsively/mcp`
+- Агенты: 11 one-click (Claude Desktop/Code, Codex, Cursor, VS Code, Windsurf, Cline, Gemini CLI, OpenCode, Continue, Hermes). Hermes/Continue — YAML с маркер-комментариями `# >>> pokefix-mcp >>>` (не трогаем чужие ключи); opencode — flat `mcp` map + `environment`; Cline/Gemini/Windsurf/Cursor — `mcpServers`+env; VS Code — ключ `servers`
+- НЕ возвращать npx-based конфиги: апстримный @responsively/mcp ищет приложение по путям ResponsivelyApp и не найдёт Pokefix
 
 ## Directory Map
 
-- `src/main/mcp/` — MCP-сервер: `toolDefs.ts` (чистые zod-схемы, БЕЗ electron-импортов — шарятся с npm-пакетом), `tools.ts` (реализация), `bridge.ts` (IPC main→renderer), `index.ts` (HTTP на 12720), `agent-config.ts` (one-click конфиги агентов)
+- `src/main/mcp/` — MCP-сервер: `toolDefs.ts` (чистые zod-схемы, БЕЗ electron-импортов — шарятся с npm-пакетом), `tools.ts` (реализация), `bridge.ts` (IPC main→renderer), `index.ts` (HTTP на 12720), `agent-config.ts` (one-click конфиги 11 агентов; пишет `<userData>/mcp/cli.js` + `ELECTRON_RUN_AS_NODE=1`, не npm)
 - `src/renderer/components/McpBridge/` — исполняет MCP-команды в webviews
 - `src/main/screenshot/` — скриншоты кадров (использовать для аннотаций, не изобретать своё)
 - `src/renderer/components/ToolBar/McpPanel/` — UI-панель MCP (toggle, copy-config)

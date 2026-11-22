@@ -148,6 +148,8 @@ const agentEnv = (): AgentEnv => ({
   homeDir: app.getPath('home'),
   platform: process.platform,
   appData: process.env.APPDATA,
+  execPath: process.execPath,
+  bridgePath: path.join(app.getPath('userData'), 'mcp', 'cli.js'),
 });
 
 ipcMain.handle(IPC_MAIN_CHANNELS.MCP_LIST_TOOLS, async () => listAgentTools(agentEnv()));

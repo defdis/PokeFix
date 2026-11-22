@@ -14,20 +14,33 @@ interface AgentToolState {
   configPath: string | null;
 }
 
+interface McpBridge {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
 interface McpServerStatus {
   enabled: boolean;
   running: boolean;
   port: number;
   endpoint: string;
   error: string | null;
+  /** Present in packaged builds: absolute stdio bridge for any MCP client. */
+  bridge: McpBridge | null;
 }
 
-const configSnippet = (): string =>
-  JSON.stringify(
-    {mcpServers: {responsively: {command: 'npx', args: ['-y', '@responsively/mcp']}}},
-    null,
-    2
-  );
+const configSnippet = (bridge: McpBridge | null): string => {
+  const server =
+    bridge === null
+      ? {command: 'npx', args: ['-y', '@responsively/mcp']}
+      : {
+          command: bridge.command,
+          args: bridge.args,
+          ...(Object.keys(bridge.env).length > 0 ? {env: bridge.env} : {}),
+        };
+  return JSON.stringify({mcpServers: {responsively: server}}, null, 2);
+};
 
 /**
  * MCP server panel: status, an on/off switch that persists, and the config
@@ -60,18 +73,6 @@ const McpPanel = () => {
 
   const setTool = async (toolId: string, add: boolean) => {
     setToolError(null);
-    if (toolId === 'hermes-webhook' && add) {
-      // The Hermes route is an UNAUTHENTICATED loopback webhook: any local
-      // process that can POST to 127.0.0.1:8644 could steer the agent.
-      // This must never happen silently.
-      const confirmed = window.confirm(
-        'This enables an UNAUTHENTICATED webhook on 127.0.0.1:8644 in your Hermes config.\n\n' +
-          'Any local process could then send annotations to your agent. Proceed only if you understand this.'
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
     try {
       const response = await window.electron.ipcRenderer.invoke<
         {toolId: string; add: boolean},
@@ -102,7 +103,10 @@ const McpPanel = () => {
   };
 
   const copyConfig = async () => {
-    await window.electron.ipcRenderer.invoke(IPC_MAIN_CHANNELS.COPY_TO_CLIPBOARD, configSnippet());
+    await window.electron.ipcRenderer.invoke(
+      IPC_MAIN_CHANNELS.COPY_TO_CLIPBOARD,
+      configSnippet(status?.bridge ?? null)
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -245,7 +249,9 @@ const McpPanel = () => {
           <span className="pointer-events-none contents">
             <Icon icon="lucide:copy" fontSize={14} className="text-muted" />
             {copied ? 'Copied!' : 'Copy config'}
-            <span className="ml-auto font-mono text-[10.5px] text-muted">any MCP client</span>
+            <span className="ml-auto font-mono text-[10.5px] text-muted">
+              stdio · any MCP client
+            </span>
           </span>
         </button>
 

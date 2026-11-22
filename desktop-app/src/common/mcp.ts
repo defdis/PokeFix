@@ -31,6 +31,13 @@ export const MCP_SERVER_INSTRUCTIONS =
 export const MCP_BEACON_FILENAME = 'app-location.json';
 
 /**
+ * The bridge is copied here on every startup so agent configs can reference a
+ * stable absolute path that survives app updates and AppImage remounts.
+ */
+export const MCP_BRIDGE_DIR = 'mcp';
+export const MCP_BRIDGE_FILENAME = 'cli.js';
+
+/**
  * Written to <userData>/app-location.json at every app startup so the
  * @responsively/mcp npm bootstrap can locate this install (and its bundled
  * MCP bridge) without any user configuration.

@@ -1,10 +1,18 @@
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {app} from 'electron';
+import fs from 'fs';
+import path from 'path';
 import http from 'http';
 import store from '../../store';
 import log from '../logging';
-import {MCP_SERVER_INFO, MCP_SERVER_INSTRUCTIONS} from '../../common/mcp';
+import {
+  MCP_SERVER_INFO,
+  MCP_SERVER_INSTRUCTIONS,
+  MCP_BRIDGE_DIR,
+  MCP_BRIDGE_FILENAME,
+} from '../../common/mcp';
+import {bridgeSpec, BridgeSpec} from './agent-config';
 import {writeMcpBeacon} from './beacon';
 import {GetMainWindow, initMcpBridge} from './bridge';
 import {registerTools} from './tools';
@@ -21,6 +29,8 @@ export interface McpServerStatus {
   port: number;
   endpoint: string;
   error: string | null;
+  /** Stdio bridge spec for MCP clients; null in dev builds without a packaged bridge. */
+  bridge: BridgeSpec | null;
 }
 
 const handleMcpRequest = async (
@@ -116,12 +126,21 @@ const stopServer = (): void => {
 
 export const getMcpServerStatus = (): McpServerStatus => {
   const port = activePort ?? resolveMcpPort();
+  const bridgePath = path.join(app.getPath('userData'), MCP_BRIDGE_DIR, MCP_BRIDGE_FILENAME);
+  const bridge = bridgeSpec({
+    homeDir: app.getPath('home'),
+    platform: process.platform,
+    appData: process.env.APPDATA,
+    execPath: process.execPath,
+    bridgePath,
+  });
   return {
     enabled: store.get('userPreferences.mcpEnabled') !== false,
     running: httpServer !== null && activePort !== null,
     port,
     endpoint: `http://127.0.0.1:${port}/mcp`,
     error: lastError,
+    bridge: fs.existsSync(bridgePath) ? bridge : null,
   };
 };
 

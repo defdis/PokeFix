@@ -1,31 +1,36 @@
 import {app} from 'electron';
 import fs from 'fs';
 import path from 'path';
-import {MCP_BEACON_FILENAME, McpBeacon} from '../../common/mcp';
+import {
+  MCP_BEACON_FILENAME,
+  MCP_BRIDGE_DIR,
+  MCP_BRIDGE_FILENAME,
+  McpBeacon,
+} from '../../common/mcp';
 
 /**
- * Returns a bridge entry point that outlives this process. On Linux the app
- * ships as an AppImage whose resources are a transient /tmp mount, so the
- * bridge is copied into userData where the npm bootstrap can load it while
- * the app is closed.
+ * Returns a bridge entry point that outlives this process. The bridge is
+ * copied into userData on EVERY platform so agent configs can reference a
+ * stable absolute path (the app bundle may move; AppImage mounts are
+ * transient on Linux). On non-packaged dev builds there is no bridge.
  */
 const stableBridgeEntry = (): string | undefined => {
   if (!app.isPackaged) {
     return undefined;
   }
-  const packagedEntry = path.join(process.resourcesPath, 'mcp', 'cli.js');
-  if (process.platform !== 'linux') {
-    return fs.existsSync(packagedEntry) ? packagedEntry : undefined;
-  }
+  const packagedEntry = path.join(process.resourcesPath, MCP_BRIDGE_DIR, MCP_BRIDGE_FILENAME);
   if (!fs.existsSync(packagedEntry)) {
     return undefined;
   }
-  const stableDir = path.join(app.getPath('userData'), 'mcp');
+  const stableDir = path.join(app.getPath('userData'), MCP_BRIDGE_DIR);
   fs.mkdirSync(stableDir, {recursive: true});
-  ['cli.js', 'manifest.json'].forEach((file) => {
-    fs.copyFileSync(path.join(process.resourcesPath, 'mcp', file), path.join(stableDir, file));
+  [MCP_BRIDGE_FILENAME, 'manifest.json'].forEach((file) => {
+    const src = path.join(process.resourcesPath, MCP_BRIDGE_DIR, file);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(stableDir, file));
+    }
   });
-  return path.join(stableDir, 'cli.js');
+  return path.join(stableDir, MCP_BRIDGE_FILENAME);
 };
 
 export const writeMcpBeacon = (mcpPort: number): void => {

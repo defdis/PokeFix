@@ -7,6 +7,19 @@ import {AgentEnv, listAgentTools, setToolEntry} from './agent-config';
 let homeDir: string;
 const env = (): AgentEnv => ({homeDir, platform: 'darwin'});
 
+// Bridge spec: app binary + bundled cli.js (ELECTRON_RUN_AS_NODE).
+const bridgeEnv = (): AgentEnv => {
+  const bridgePath = path.join(homeDir, 'userData', 'mcp', 'cli.js');
+  fs.mkdirSync(path.dirname(bridgePath), {recursive: true});
+  fs.writeFileSync(bridgePath, '// bridge');
+  return {
+    homeDir,
+    platform: 'darwin',
+    execPath: '/Applications/Pokefix.app/Contents/MacOS/Pokefix',
+    bridgePath,
+  };
+};
+
 const cursorConfig = () => path.join(homeDir, '.cursor', 'mcp.json');
 const codexConfig = () => path.join(homeDir, '.codex', 'config.toml');
 const vscodeConfig = () =>
@@ -28,7 +41,7 @@ afterEach(() => {
 describe('listAgentTools', () => {
   it('reports tools as not installed when nothing is on disk', () => {
     const tools = listAgentTools(env());
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(11);
     expect(tools.every((t) => !t.installed)).toBe(true);
     expect(tools.every((t) => !t.added)).toBe(true);
   });
@@ -136,5 +149,140 @@ describe('setToolEntry (Codex TOML)', () => {
     expect(listAgentTools(env()).find((t) => t.id === 'codex')?.added).toBe(true);
     setToolEntry(env(), 'codex', false);
     expect(listAgentTools(env()).find((t) => t.id === 'codex')?.added).toBe(false);
+  });
+});
+
+describe('bridge spec', () => {
+  it('writes the app binary + bundled bridge for JSON tools when available', () => {
+    setToolEntry(bridgeEnv(), 'cursor', true);
+    const config = JSON.parse(fs.readFileSync(cursorConfig(), 'utf-8'));
+    expect(config.mcpServers.responsively).toEqual({
+      command: '/Applications/Pokefix.app/Contents/MacOS/Pokefix',
+      args: [path.join(homeDir, 'userData', 'mcp', 'cli.js')],
+      env: {ELECTRON_RUN_AS_NODE: '1'},
+    });
+  });
+
+  it('writes env into the Codex TOML block when the bridge is used', () => {
+    setToolEntry(bridgeEnv(), 'codex', true);
+    const raw = fs.readFileSync(codexConfig(), 'utf-8');
+    expect(raw).toContain('command = "/Applications/Pokefix.app/Contents/MacOS/Pokefix"');
+    expect(raw).toContain('env = { ELECTRON_RUN_AS_NODE = "1" }');
+  });
+});
+
+describe('setToolEntry (opencode)', () => {
+  const opencodeConfig = () => path.join(homeDir, '.config', 'opencode', 'opencode.json');
+
+  it('writes the flat mcp entry with array command', () => {
+    write(
+      opencodeConfig(),
+      JSON.stringify(
+        {mcp: {'chrome-devtools': {type: 'local', command: ['npx'], enabled: true}}},
+        null,
+        2
+      )
+    );
+    setToolEntry(bridgeEnv(), 'opencode', true);
+    const config = JSON.parse(fs.readFileSync(opencodeConfig(), 'utf-8'));
+    expect(config.mcp['chrome-devtools']).toBeDefined();
+    expect(config.mcp.responsively).toEqual({
+      type: 'local',
+      command: [
+        '/Applications/Pokefix.app/Contents/MacOS/Pokefix',
+        path.join(homeDir, 'userData', 'mcp', 'cli.js'),
+      ],
+      enabled: true,
+      environment: {ELECTRON_RUN_AS_NODE: '1'},
+    });
+  });
+
+  it('removes only our entry', () => {
+    write(
+      opencodeConfig(),
+      JSON.stringify({mcp: {'chrome-devtools': {type: 'local', command: ['npx'], enabled: true}}})
+    );
+    setToolEntry(bridgeEnv(), 'opencode', true);
+    setToolEntry(bridgeEnv(), 'opencode', false);
+    const config = JSON.parse(fs.readFileSync(opencodeConfig(), 'utf-8'));
+    expect(config.mcp.responsively).toBeUndefined();
+    expect(config.mcp['chrome-devtools']).toBeDefined();
+  });
+});
+
+describe('setToolEntry (Hermes yaml)', () => {
+  const hermesConfig = () => path.join(homeDir, '.hermes', 'config.yaml');
+  const withMcpServers = [
+    'model: test',
+    'mcp_servers:',
+    '  mempalace:',
+    '    url: http://example.invalid/mcp',
+    '    timeout: 180',
+    '',
+  ].join('\n');
+
+  it('inserts under an existing mcp_servers key and removes cleanly', () => {
+    write(hermesConfig(), withMcpServers);
+    setToolEntry(bridgeEnv(), 'hermes', true);
+    const added = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(added).toContain('mcp_servers:');
+    expect(added).toContain('mempalace:');
+    expect(added).toContain('responsively:');
+    expect(added).toContain('ELECTRON_RUN_AS_NODE');
+
+    setToolEntry(bridgeEnv(), 'hermes', false);
+    const removed = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(removed).not.toContain('responsively');
+    expect(removed).toContain('mempalace:');
+    expect(removed).toContain('mcp_servers:'); // user's own key survives
+  });
+
+  it('creates the mcp_servers section when missing', () => {
+    write(hermesConfig(), 'model: test\n');
+    setToolEntry(bridgeEnv(), 'hermes', true);
+    const added = fs.readFileSync(hermesConfig(), 'utf-8');
+    expect(added).toContain('mcp_servers:');
+    expect(added).toContain('responsively:');
+  });
+
+  it('add is idempotent', () => {
+    write(hermesConfig(), withMcpServers);
+    setToolEntry(bridgeEnv(), 'hermes', true);
+    const once = fs.readFileSync(hermesConfig(), 'utf-8');
+    setToolEntry(bridgeEnv(), 'hermes', true);
+    expect(fs.readFileSync(hermesConfig(), 'utf-8')).toBe(once);
+  });
+
+  it('refuses an inline mcp_servers flow value', () => {
+    write(hermesConfig(), 'mcp_servers: {}\n');
+    const result = setToolEntry(bridgeEnv(), 'hermes', true);
+    expect(result).toHaveProperty('error');
+    expect(fs.readFileSync(hermesConfig(), 'utf-8')).toBe('mcp_servers: {}\n');
+  });
+
+  it('removing when nothing was added leaves the file untouched', () => {
+    write(hermesConfig(), withMcpServers);
+    setToolEntry(bridgeEnv(), 'hermes', false);
+    expect(fs.readFileSync(hermesConfig(), 'utf-8')).toBe(withMcpServers);
+  });
+});
+
+describe('setToolEntry (Continue yaml)', () => {
+  const continueConfig = () => path.join(homeDir, '.continue', 'config.yaml');
+
+  it('appends a stdio list item under mcpServers', () => {
+    write(continueConfig(), 'models:\n  - name: test\n');
+    setToolEntry(bridgeEnv(), 'continue', true);
+    const raw = fs.readFileSync(continueConfig(), 'utf-8');
+    expect(raw).toContain('mcpServers:');
+    expect(raw).toContain('- name: responsively');
+    expect(raw).toContain('type: stdio');
+    expect(raw).toContain('ELECTRON_RUN_AS_NODE');
+
+    setToolEntry(bridgeEnv(), 'continue', false);
+    const after = fs.readFileSync(continueConfig(), 'utf-8');
+    expect(after).not.toContain('responsively');
+    expect(after).not.toContain('mcpServers:'); // our-only key is dropped with our block
+    expect(after).toContain('name: test');
   });
 });

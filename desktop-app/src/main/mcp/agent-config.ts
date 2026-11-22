@@ -2,53 +2,44 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Writes the Pokefix MCP server into the config files of AI coding
- * tools. These files belong to other applications, so every write reads the
+ * Writes the Pokefix MCP server into the config files of AI coding tools.
+ * These files belong to other applications, so every write reads the
  * existing content, changes only our own entry, and saves atomically — an
  * unparseable or unexpected file is left alone rather than overwritten.
+ *
+ * The stdio bridge ships inside the app (resources/mcp/cli.js) and is copied
+ * into userData on every startup (see mcp/beacon.ts), so agent configs can
+ * reference a stable absolute path: <execPath> as a Node runtime (via
+ * ELECTRON_RUN_AS_NODE) + <userData>/mcp/cli.js. No npm, no network, no
+ * separate bootstrap package required.
  */
 
 export const SERVER_KEY = 'responsively';
-export const SERVER_COMMAND = 'npx';
-export const SERVER_ARGS = ['-y', '@responsively/mcp'];
+
+export interface BridgeSpec {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+/** The bridge spec written into agent configs (with a dev-machine fallback). */
+export const bridgeSpec = (env: AgentEnv): BridgeSpec => {
+  if (env.execPath && env.bridgePath && fs.existsSync(env.bridgePath)) {
+    return {
+      command: env.execPath,
+      args: [env.bridgePath],
+      env: {ELECTRON_RUN_AS_NODE: '1'},
+    };
+  }
+  // Dev builds (and the pre-bridge fallback): use the npm bootstrap.
+  return {command: 'npx', args: ['-y', '@responsively/mcp'], env: {}};
+};
 
 export type ConfigFormat = 'json' | 'toml' | 'yaml';
 
-/**
- * Hermes config.yaml block appended by the hermes-webhook "tool". YAML text is
- * appended (not re-dumped) so user comments elsewhere in the file survive.
- */
-const HERMES_HOOK_BLOCK = [
-  'platforms:',
-  '  webhook:',
-  '    enabled: true',
-  '    extra:',
-  '      host: "127.0.0.1"',
-  '      port: 8644',
-  '      secret: "INSECURE_NO_AUTH"',
-  '      routes:',
-  '        responsively:',
-  '          secret: "INSECURE_NO_AUTH"',
-  '          events: "annotations"',
-  '          deliver: "log"',
-  '          prompt: "Пользователь прислал замечания по UI из Pokefix. payload.markdown и payload.items содержат метки. Забери их и обработай: исправь код и ответь, что сделал."',
-].join('\n');
-
-/**
- * Marker for our webhook route. The route key sits at a fixed indent (8
- * spaces) inside the `routes:` map; matching the bare word would also match
- * unrelated keys/comments that happen to contain 'responsively:'.
- */
-const HOOK_ROUTE_MARKER_REGEX = /^ {8}responsively:\s*$/m;
-
-const hermesConfigState = (raw: string): 'absent' | 'configured' | 'conflict' => {
-  if (HOOK_ROUTE_MARKER_REGEX.test(raw)) {
-    return 'configured';
-  }
-  // A root-level 'platforms:' key already exists (possibly for other platforms).
-  // Appending ours again would create a duplicate key, so we refuse to guess.
-  return /^platforms:\s*$/m.test(raw) ? 'conflict' : 'absent';
-};
+export type EntryKind =
+  | 'standard' // {command, args, env?} under the servers map
+  | 'opencode'; // opencode's own shape: [command, ...args] array + environment
 
 export interface AgentTool {
   id: string;
@@ -56,10 +47,11 @@ export interface AgentTool {
   icon: string;
   color: string;
   format: ConfigFormat;
-  /** Property that holds the server map. VS Code calls it `servers`. */
+  /** Property that holds the server map (VS Code uses `servers`, opencode `mcp`). */
   serversKey: string;
-  /** Config file, or null when the tool has no known location here. */
-  configPath: string | null;
+  /** JSON entry shape (json format only). */
+  entry: EntryKind;
+  configPath: string;
   /** Directory whose presence means the tool is installed. */
   markerPath: string | null;
 }
@@ -80,6 +72,10 @@ export interface AgentEnv {
   platform: NodeJS.Platform;
   /** %APPDATA% on Windows. */
   appData?: string;
+  /** Absolute path of the app's executable (used as the Node runtime). */
+  execPath?: string;
+  /** Stable path of the bundled MCP bridge (userData/mcp/cli.js). */
+  bridgePath?: string;
 }
 
 const appSupportDir = (env: AgentEnv, name: string): string => {
@@ -93,7 +89,6 @@ const appSupportDir = (env: AgentEnv, name: string): string => {
 };
 
 export const getAgentTools = (env: AgentEnv): AgentTool[] => {
-  const claudeDir = appSupportDir(env, 'Claude');
   const vsCodeUserDir = path.join(appSupportDir(env, 'Code'), 'User');
 
   return [
@@ -104,8 +99,9 @@ export const getAgentTools = (env: AgentEnv): AgentTool[] => {
       color: '#d97757',
       format: 'json',
       serversKey: 'mcpServers',
-      configPath: path.join(claudeDir, 'claude_desktop_config.json'),
-      markerPath: claudeDir,
+      entry: 'standard',
+      configPath: path.join(appSupportDir(env, 'Claude'), 'claude_desktop_config.json'),
+      markerPath: appSupportDir(env, 'Claude'),
     },
     {
       id: 'claude-code',
@@ -114,16 +110,18 @@ export const getAgentTools = (env: AgentEnv): AgentTool[] => {
       color: '#b85c3e',
       format: 'json',
       serversKey: 'mcpServers',
+      entry: 'standard',
       configPath: path.join(env.homeDir, '.claude.json'),
       markerPath: path.join(env.homeDir, '.claude'),
     },
     {
       id: 'codex',
       name: 'Codex',
-      icon: 'lucide:terminal',
+      icon: 'lucide:cpu',
       color: '#10a37f',
       format: 'toml',
       serversKey: 'mcp_servers',
+      entry: 'standard',
       configPath: path.join(env.homeDir, '.codex', 'config.toml'),
       markerPath: path.join(env.homeDir, '.codex'),
     },
@@ -134,6 +132,7 @@ export const getAgentTools = (env: AgentEnv): AgentTool[] => {
       color: '#4f46e5',
       format: 'json',
       serversKey: 'mcpServers',
+      entry: 'standard',
       configPath: path.join(env.homeDir, '.cursor', 'mcp.json'),
       markerPath: path.join(env.homeDir, '.cursor'),
     },
@@ -144,16 +143,79 @@ export const getAgentTools = (env: AgentEnv): AgentTool[] => {
       color: '#007acc',
       format: 'json',
       serversKey: 'servers',
+      entry: 'standard',
       configPath: path.join(vsCodeUserDir, 'mcp.json'),
       markerPath: vsCodeUserDir,
     },
     {
-      id: 'hermes-webhook',
+      id: 'windsurf',
+      name: 'Windsurf',
+      icon: 'lucide:wind',
+      color: '#00c2a8',
+      format: 'json',
+      serversKey: 'mcpServers',
+      entry: 'standard',
+      configPath: path.join(env.homeDir, '.codeium', 'windsurf', 'mcp_config.json'),
+      markerPath: path.join(env.homeDir, '.codeium'),
+    },
+    {
+      id: 'cline',
+      name: 'Cline',
+      icon: 'lucide:bot',
+      color: '#a259ff',
+      format: 'json',
+      serversKey: 'mcpServers',
+      entry: 'standard',
+      configPath: path.join(
+        vsCodeUserDir,
+        'globalStorage',
+        'saoudrizwan.claude-dev',
+        'settings',
+        'cline_mcp_settings.json'
+      ),
+      markerPath: path.join(vsCodeUserDir, 'globalStorage', 'saoudrizwan.claude-dev'),
+    },
+    {
+      id: 'gemini-cli',
+      name: 'Gemini CLI',
+      icon: 'lucide:sparkles',
+      color: '#4285f4',
+      format: 'json',
+      serversKey: 'mcpServers',
+      entry: 'standard',
+      configPath: path.join(env.homeDir, '.gemini', 'settings.json'),
+      markerPath: path.join(env.homeDir, '.gemini'),
+    },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      icon: 'lucide:terminal',
+      color: '#334155',
+      format: 'json',
+      serversKey: 'mcp',
+      entry: 'opencode',
+      configPath: path.join(env.homeDir, '.config', 'opencode', 'opencode.json'),
+      markerPath: path.join(env.homeDir, '.config', 'opencode'),
+    },
+    {
+      id: 'continue',
+      name: 'Continue',
+      icon: 'lucide:play',
+      color: '#9333ea',
+      format: 'yaml',
+      serversKey: 'mcpServers',
+      entry: 'standard',
+      configPath: path.join(env.homeDir, '.continue', 'config.yaml'),
+      markerPath: path.join(env.homeDir, '.continue'),
+    },
+    {
+      id: 'hermes',
       name: 'Hermes Agent',
       icon: 'emoji:🧠',
       color: '#FFD84D',
       format: 'yaml',
-      serversKey: 'responsively',
+      serversKey: 'mcp_servers',
+      entry: 'standard',
       configPath: path.join(env.homeDir, '.hermes', 'config.yaml'),
       markerPath: path.join(env.homeDir, '.hermes'),
     },
@@ -189,16 +251,38 @@ const writeAtomic = (file: string, contents: string): void => {
   fs.renameSync(tmp, file);
 };
 
+const standardJsonEntry = (spec: BridgeSpec): Record<string, unknown> => ({
+  command: spec.command,
+  args: spec.args,
+  ...(Object.keys(spec.env).length > 0 ? {env: spec.env} : {}),
+});
+
+const opencodeEntry = (spec: BridgeSpec): Record<string, unknown> => ({
+  type: 'local',
+  command: [spec.command, ...spec.args],
+  enabled: true,
+  ...(Object.keys(spec.env).length > 0 ? {environment: spec.env} : {}),
+});
+
+const tomlEscape = (value: string): string => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
 const TOML_SECTION = (key: string) => `[${key}.${SERVER_KEY}]`;
 
 const tomlHasEntry = (raw: string, serversKey: string): boolean =>
   raw.split('\n').some((line) => line.trim() === TOML_SECTION(serversKey));
 
-const tomlAddEntry = (raw: string, serversKey: string): string => {
+const tomlAddEntry = (raw: string, serversKey: string, spec: BridgeSpec): string => {
   const block = [
     TOML_SECTION(serversKey),
-    `command = "${SERVER_COMMAND}"`,
-    `args = [${SERVER_ARGS.map((a) => `"${a}"`).join(', ')}]`,
+    `command = "${tomlEscape(spec.command)}"`,
+    `args = [${spec.args.map((a) => `"${tomlEscape(a)}"`).join(', ')}]`,
+    ...(Object.keys(spec.env).length > 0
+      ? [
+          `env = { ${Object.entries(spec.env)
+            .map(([k, v]) => `${k} = "${tomlEscape(v)}"`)
+            .join(', ')} }`,
+        ]
+      : []),
   ].join('\n');
   const base = raw.trim();
   return base === '' ? `${block}\n` : `${base}\n\n${block}\n`;
@@ -221,20 +305,105 @@ const tomlRemoveEntry = (raw: string, serversKey: string): string => {
     .trim()}\n`;
 };
 
+// --- YAML: Hermes uses a map under `mcp_servers:`, Continue a list under
+// `mcpServers:`. Our entries live between marker comments we own, so they can
+// be added/removed without re-dumping — and without touching anything else.
+
+const YAML_BEGIN = '  # >>> pokefix-mcp >>>';
+const YAML_END = '  # <<< pokefix-mcp <<<';
+const yamlScalar = (value: string): string => JSON.stringify(value);
+
+const yamlBlockLines = (spec: BridgeSpec, asListItem: boolean): string[] => {
+  const envLines =
+    Object.keys(spec.env).length > 0
+      ? ['    env:', ...Object.entries(spec.env).map(([k, v]) => `      ${k}: ${yamlScalar(v)}`)]
+      : [];
+  const head = asListItem
+    ? [`  - name: ${SERVER_KEY}`, '    type: stdio', `    command: ${yamlScalar(spec.command)}`]
+    : [`  ${SERVER_KEY}:`, `    command: ${yamlScalar(spec.command)}`];
+  return [...head, '    args:', ...spec.args.map((a) => `      - ${yamlScalar(a)}`), ...envLines];
+};
+
+const yamlHasEntry = (raw: string): boolean => raw.includes(YAML_BEGIN);
+
+/**
+ * Insert our marked block under `key` (a top-level map or list), or append a
+ * new top-level section when missing. Refuses to guess when the key exists
+ * with an inline/flow value.
+ */
+const yamlAdd = (raw: string, key: string, block: string[]): string | {error: string} => {
+  if (raw.includes(YAML_BEGIN)) {
+    return raw; // already present (idempotent)
+  }
+  const marked = [YAML_BEGIN, ...block, YAML_END].join('\n');
+  const keyRe = new RegExp(`^${key}:[ \\t]*$`, 'm');
+  const inlineRe = new RegExp(`^${key}:[ \\t]*\\S`, 'm');
+  const match = raw.match(keyRe);
+  if (match && match.index !== undefined) {
+    const insertAt = match.index + match[0].length;
+    return `${raw.slice(0, insertAt)}\n${marked}\n${raw.slice(insertAt)}`;
+  }
+  if (inlineRe.test(raw)) {
+    return {
+      error: `${key} is set inline — add the Pokefix entry manually to keep your file intact.`,
+    };
+  }
+  const base = raw.trimEnd();
+  return `${base === '' ? '' : `${base}\n\n`}${key}:\n${marked}\n`;
+};
+
+const yamlRemove = (raw: string, key: string): string => {
+  const begin = raw.indexOf(YAML_BEGIN);
+  if (begin === -1) {
+    return raw;
+  }
+  const endIdx = raw.indexOf(YAML_END, begin);
+  if (endIdx === -1) {
+    return raw;
+  }
+  const end = endIdx + YAML_END.length;
+  const lineStart = raw.lastIndexOf('\n', begin) + 1;
+  let lineEnd = raw.indexOf('\n', end);
+  lineEnd = lineEnd === -1 ? raw.length : lineEnd + 1;
+  const out = raw.slice(0, lineStart) + raw.slice(lineEnd);
+  // If the owning top-level key is now childless, drop it — a bare `key:`
+  // parses as null and some loaders choke on it.
+  const lines = out.split('\n');
+  const keyIdx = lines.findIndex((line) => line.trim() === `${key}:`);
+  if (keyIdx !== -1) {
+    let i = keyIdx + 1;
+    let hasChild = false;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.trim() === '') {
+        i += 1;
+        continue;
+      }
+      hasChild = /^\s/.test(line);
+      break;
+    }
+    if (!hasChild) {
+      lines.splice(keyIdx, 1);
+    }
+  }
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+};
+
 const jsonHasEntry = (config: Record<string, unknown>, serversKey: string): boolean => {
   const servers = config[serversKey];
   return typeof servers === 'object' && servers !== null && SERVER_KEY in servers;
 };
 
 export const isToolAdded = (tool: AgentTool): boolean => {
-  if (tool.configPath === null || !fs.existsSync(tool.configPath)) {
+  if (!fs.existsSync(tool.configPath)) {
     return false;
   }
+  const raw = fs.readFileSync(tool.configPath, 'utf-8');
   if (tool.format === 'toml') {
-    return tomlHasEntry(fs.readFileSync(tool.configPath, 'utf-8'), tool.serversKey);
+    return tomlHasEntry(raw, tool.serversKey);
   }
   if (tool.format === 'yaml') {
-    return HOOK_ROUTE_MARKER_REGEX.test(fs.readFileSync(tool.configPath, 'utf-8'));
+    return yamlHasEntry(raw);
   }
   const config = readJson(tool.configPath);
   return config !== null && jsonHasEntry(config, tool.serversKey);
@@ -251,126 +420,80 @@ export const listAgentTools = (env: AgentEnv): AgentToolState[] =>
     added: isToolAdded(tool),
   }));
 
+interface SetToolResult {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  configPath: string | null;
+  installed: boolean;
+  added: boolean;
+}
+
+const stateFor = (tool: AgentTool): SetToolResult => ({
+  id: tool.id,
+  name: tool.name,
+  icon: tool.icon,
+  color: tool.color,
+  configPath: tool.configPath,
+  installed: exists(tool.markerPath) || exists(tool.configPath),
+  added: isToolAdded(tool),
+});
+
 export const setToolEntry = (
   env: AgentEnv,
   toolId: string,
   add: boolean
-): AgentToolState | {error: string} => {
+): SetToolResult | {error: string} => {
   const tool = getAgentTools(env).find((t) => t.id === toolId);
-  if (tool === undefined || tool.configPath === null) {
+  if (tool === undefined) {
     return {error: `Unknown tool: ${toolId}`};
   }
 
-  if (tool.format === 'yaml') {
-    // Hermes config.yaml — comments belong to the user, so we append/strip text
-    // instead of re-dumping the parsed tree.
-    const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
-    const state = hermesConfigState(raw);
-    if (add) {
-      if (state === 'configured') {
-        return {
-          id: tool.id,
-          name: tool.name,
-          icon: tool.icon,
-          color: tool.color,
-          configPath: tool.configPath,
-          installed: true,
-          added: true,
-        };
-      }
-      if (state === 'conflict') {
-        return {
-          error: `${tool.name}'s config already has a root 'platforms:' key — add the webhook block manually to avoid a duplicate key.`,
-        };
-      }
-      writeAtomic(tool.configPath, `${raw.trimEnd()}\n\n${HERMES_HOOK_BLOCK}\n`);
-    } else {
-      if (state !== 'configured') {
-        return {
-          id: tool.id,
-          name: tool.name,
-          icon: tool.icon,
-          color: tool.color,
-          configPath: tool.configPath,
-          installed: true,
-          added: false,
-        };
-      }
-      // Remove only the route we added; leave the rest of the file untouched.
-      const lines = raw.split('\n');
-      const isOursBlock = raw.includes(HERMES_HOOK_BLOCK);
-      const routeStart = lines.findIndex((line) => line.trim() === 'responsively:');
-      if (routeStart !== -1) {
-        let end = routeStart + 1;
-        while (end < lines.length && lines[end].startsWith('          ')) {
-          end += 1;
-        }
-        let kept = [...lines.slice(0, routeStart), ...lines.slice(end)];
-        // If the whole scaffold was ours (block matched byte-for-byte), drop it too.
-        if (isOursBlock) {
-          const scaffoldStart = lines.findIndex((line) => line.trim() === 'platforms:');
-          let scaffoldEnd = scaffoldStart + 1;
-          while (scaffoldEnd < lines.length && lines[scaffoldEnd].startsWith('  ')) {
-            scaffoldEnd += 1;
-          }
-          kept = [...lines.slice(0, scaffoldStart), ...lines.slice(scaffoldEnd)];
-        }
-        writeAtomic(
-          tool.configPath,
-          `${kept
-            .join('\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trimEnd()}\n`
-        );
-      }
-    }
-
-    return {
-      id: tool.id,
-      name: tool.name,
-      icon: tool.icon,
-      color: tool.color,
-      configPath: tool.configPath,
-      installed: true,
-      added: isToolAdded(tool),
-    };
-  }
+  const spec = bridgeSpec(env);
 
   if (tool.format === 'toml') {
     const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
     const next = add
       ? tomlHasEntry(raw, tool.serversKey)
         ? raw
-        : tomlAddEntry(raw, tool.serversKey)
+        : tomlAddEntry(raw, tool.serversKey, spec)
       : tomlRemoveEntry(raw, tool.serversKey);
     writeAtomic(tool.configPath, next);
-  } else {
-    const config = readJson(tool.configPath);
-    if (config === null) {
-      return {error: `${tool.name}'s config file isn't valid JSON — left untouched.`};
-    }
-    const servers =
-      typeof config[tool.serversKey] === 'object' && config[tool.serversKey] !== null
-        ? {...(config[tool.serversKey] as Record<string, unknown>)}
-        : {};
-    if (add) {
-      servers[SERVER_KEY] = {command: SERVER_COMMAND, args: SERVER_ARGS};
-    } else {
-      delete servers[SERVER_KEY];
-    }
-    writeAtomic(
-      tool.configPath,
-      `${JSON.stringify({...config, [tool.serversKey]: servers}, null, 2)}\n`
-    );
+    return stateFor(tool);
   }
 
-  return {
-    id: tool.id,
-    name: tool.name,
-    icon: tool.icon,
-    color: tool.color,
-    configPath: tool.configPath,
-    installed: true,
-    added: isToolAdded(tool),
-  };
+  if (tool.format === 'yaml') {
+    const raw = fs.existsSync(tool.configPath) ? fs.readFileSync(tool.configPath, 'utf-8') : '';
+    if (add) {
+      const result = yamlAdd(raw, tool.serversKey, yamlBlockLines(spec, tool.id === 'continue'));
+      if (typeof result !== 'string') {
+        return {error: result.error};
+      }
+      writeAtomic(tool.configPath, result);
+    } else {
+      writeAtomic(tool.configPath, yamlRemove(raw, tool.serversKey));
+    }
+    return stateFor(tool);
+  }
+
+  // JSON family
+  const config = readJson(tool.configPath);
+  if (config === null) {
+    return {error: `${tool.name}'s config file isn't valid JSON — left untouched.`};
+  }
+  const servers =
+    typeof config[tool.serversKey] === 'object' && config[tool.serversKey] !== null
+      ? {...(config[tool.serversKey] as Record<string, unknown>)}
+      : {};
+  if (add) {
+    servers[SERVER_KEY] = tool.entry === 'opencode' ? opencodeEntry(spec) : standardJsonEntry(spec);
+  } else {
+    delete servers[SERVER_KEY];
+  }
+  writeAtomic(
+    tool.configPath,
+    `${JSON.stringify({...config, [tool.serversKey]: servers}, null, 2)}\n`
+  );
+  return stateFor(tool);
 };

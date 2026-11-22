@@ -56,9 +56,41 @@ yarn package     # production build (unsigned) → release/build/
 ## MCP
 
 The app runs a local MCP server on `http://127.0.0.1:12720/mcp` whenever it is running.
-Point your agent at that endpoint (HTTP transport). The stdio bootstrap
-(`@responsively/mcp`, upstream) also works — it discovers the app via the
-`app-location.json` beacon the app writes on startup.
+The easiest way to connect an agent is the **MCP panel in the toolbar** — it lists the tools
+installed on your machine and adds/removes the Pokefix MCP server for each with one click.
+All configs use the stdio bridge bundled inside the app
+(`<userData>/mcp/cli.js` via the app binary with `ELECTRON_RUN_AS_NODE=1`): no npm install,
+no network, no PATH setup, and it launches the app on demand if it isn't running.
+
+One-click support: **Claude Desktop, Claude Code, Codex, Cursor, VS Code, Windsurf, Cline,
+Gemini CLI, OpenCode, Continue, Hermes Agent**. Any other MCP-capable agent can use the same
+stdio command — or the HTTP endpoint directly (`http://127.0.0.1:12720/mcp`, streamable HTTP,
+stateless, no auth — loopback only).
+
+Manual config example (any MCP client with a stdio transport), or click **Copy config** in
+the MCP panel for a ready-to-paste snippet with absolute paths for your machine:
+
+```json
+{
+  "mcpServers": {
+    "responsively": {
+      "command": "/Applications/Pokefix.app/Contents/MacOS/Pokefix",
+      "args": ["<userData>/mcp/cli.js"],
+      "env": { "ELECTRON_RUN_AS_NODE": "1" }
+    }
+  }
+}
+```
+
+Notes:
+
+- **Hermes**: the toggle adds `mcp_servers.responsively` (stdio) to `~/.hermes/config.yaml`
+  between `# >>> pokefix-mcp >>>` markers — existing entries are preserved; remove with the
+  same toggle. HTTP endpoint also works (`url: http://127.0.0.1:12720/mcp`).
+- **Agents without MCP support** (e.g. aider): use the plane button in the annotation bar —
+  it runs any CLI agent command you configure (default `hermes -z {prompt}`).
+- The one-click toggle writes only our own entry and leaves the rest of your config intact
+  (atomic write, backups via the surrounding file, refuses to touch unparseable files).
 
 Tools (upstream + fork):
 
