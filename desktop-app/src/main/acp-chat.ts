@@ -57,10 +57,14 @@ interface SessionState {
   owner: WebContents;
   buffer: string;
   pending: Map<number, PendingRequest>;
-  pendingPermissions: Map<number, (optionId: string | null) => void>;
+  pendingPermissions: Map<number, () => void>;
   nextId: number;
-  /** Id of the in-flight session/prompt, if any — used by cancel and by the UI. */
+  /** Id of the in-flight session/prompt, if any — used by cancel and the UI. */
   activePromptId: number | null;
+  /** True once this turn produced at least one content update (chunk/tool/plan). */
+  turnChunkSeen: boolean;
+  /** Hard watchdog: if the agent goes silent mid-turn, free the turn anyway. */
+  turnWatchdog: NodeJS.Timeout | null;
 }
 
 let current: SessionState | null = null;
@@ -110,6 +114,39 @@ const notify = (state: SessionState, method: string, params?: unknown): void => 
   writeLine(state, {jsonrpc: '2.0', method, params});
 };
 
+const TURN_TIMEOUT_MS = 4 * 60 * 1000;
+
+/**
+ * Mark the in-flight turn finished: stop the watchdog, free the prompt slot and
+ * notify the renderer. Idempotent — hermes never sends the session/prompt
+ * response, so BOTH the (possibly absent) response and the trailing usage_update
+ * funnel here; whichever comes first wins.
+ */
+const completeTurn = (state: SessionState, stopReason: string): void => {
+  if (state.turnWatchdog) {
+    clearTimeout(state.turnWatchdog);
+    state.turnWatchdog = null;
+  }
+  if (state.activePromptId === null) return; // already completed
+  const promptId = state.activePromptId;
+  state.activePromptId = null;
+  state.pending.delete(promptId);
+  sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, {type: 'turn-complete', stopReason});
+};
+
+const armTurnWatchdog = (state: SessionState): void => {
+  if (state.turnWatchdog) clearTimeout(state.turnWatchdog);
+  state.turnWatchdog = setTimeout(() => {
+    if (state.activePromptId !== null) {
+      completeTurn(state, 'timeout');
+      sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, {
+        type: 'error',
+        message: 'Агент молчит больше четырёх минут — ход закрыт по таймауту.',
+      });
+    }
+  }, TURN_TIMEOUT_MS);
+};
+
 const handleLine = (state: SessionState, raw: string): void => {
   const msg = parseAcpLine(raw);
   if (!msg) return;
@@ -152,9 +189,24 @@ const handleLine = (state: SessionState, raw: string): void => {
   if ('method' in msg && msg.method === 'session/update') {
     const params = (msg.params ?? {}) as {update?: unknown};
     const event = mapSessionUpdate(params.update);
-    if (event) {
-      sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, event);
+    if (!event) return;
+    if (
+      event.type === 'agent-message' ||
+      event.type === 'agent-thought' ||
+      event.type === 'tool-call' ||
+      event.type === 'tool-update' ||
+      event.type === 'plan'
+    ) {
+      state.turnChunkSeen = true;
     }
+    // Hermes never answers session/prompt — the turn is done when the
+    // trailing usage_update lands AFTER actual content was produced.
+    if (event.type === 'usage' && state.activePromptId !== null && state.turnChunkSeen) {
+      sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, event);
+      completeTurn(state, 'end_turn');
+      return;
+    }
+    sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, event);
   }
 };
 
@@ -162,6 +214,7 @@ export const killAgentChat = (): void => {
   const state = current;
   current = null;
   if (!state) return;
+  if (state.turnWatchdog) clearTimeout(state.turnWatchdog);
   for (const pending of state.pending.values()) {
     pending.reject(new Error('Chat session closed'));
   }
@@ -219,6 +272,8 @@ const spawnSession = async (
     pendingPermissions: new Map(),
     nextId: 1,
     activePromptId: null,
+    turnChunkSeen: false,
+    turnWatchdog: null,
   };
   current = state;
 
@@ -240,6 +295,7 @@ const spawnSession = async (
     sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EXIT, {code: -1, error: String(error)});
   });
   child.on('exit', (code) => {
+    if (state.turnWatchdog) clearTimeout(state.turnWatchdog);
     for (const pending of state.pending.values()) {
       pending.reject(new Error('Agent process exited'));
     }
@@ -301,6 +357,7 @@ export const initAgentChat = (): void => {
       return {ok: false, error: 'Agent is still answering — wait or stop it.'};
     }
     const sentId = state.nextId;
+    state.turnChunkSeen = false;
     const promptResult = call(
       state,
       'session/prompt',
@@ -308,18 +365,18 @@ export const initAgentChat = (): void => {
       undefined
     );
     state.activePromptId = sentId;
+    armTurnWatchdog(state);
     promptResult
       .then((res) => {
-        state.activePromptId = null;
         const stopReason =
           typeof res === 'object' && res !== null && 'stopReason' in res
             ? String((res as {stopReason?: unknown}).stopReason ?? 'end_turn')
             : 'end_turn';
-        sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, {type: 'turn-complete', stopReason});
+        completeTurn(state, stopReason);
         return undefined;
       })
       .catch((error: Error) => {
-        state.activePromptId = null;
+        completeTurn(state, 'error');
         sendTo(state, IPC_MAIN_CHANNELS.AGENT_CHAT_EVENT, {
           type: 'error',
           message: error.message,
@@ -332,6 +389,10 @@ export const initAgentChat = (): void => {
     const state = current;
     if (!state) return {ok: false};
     notify(state, 'session/cancel', {sessionId: state.sessionId});
+    if (state.turnWatchdog) {
+      clearTimeout(state.turnWatchdog);
+      state.turnWatchdog = null;
+    }
     // The pending prompt may never resolve (e.g. agent wedges); don't let the
     // UI wedge with it — turn-complete/error will simply re-clear this.
     state.activePromptId = null;

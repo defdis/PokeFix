@@ -22,12 +22,12 @@ Electron-десктоп-приложение Responsively 2.0.0-beta.0. Multi-vi
 
 ## Directory Map
 
-- `src/main/acp-chat.ts` + `src/common/acp.ts` — «Агент-чат»: ACP (Agent Client Protocol) по stdio к `hermes acp` / `opencode acp`; стриминг `session/update` (agent_message_chunk/tool_call/usage), permission-запросы → inline-кнопки; cwd = `baAgentCwd` (общая с самолётиком); UI: `src/renderer/components/AgentChat/` (FAB + панель)
+- `src/main/acp-chat.ts` + `src/common/acp.ts` — «Агент-чат»: ACP (Agent Client Protocol) по stdio к `hermes acp` / `opencode acp`; стриминг `session/update` (agent_message_chunk/tool_call/usage). ВАЖНО: hermes НИКОГДА не шлёт JSON-RPC ответ на `session/prompt` (проверено 2026-11-22 дважды) — завершение хода детектируется по trailing `usage_update` после контентных чанков (+ watchdog 4 мин), turn-complete идемпотентен
+- Permission-запросы от агента → inline-кнопки; cwd = `baAgentCwd` (общая с самолётиком); UI: `src/renderer/components/AgentChat/` (FAB + панель)
 - `src/main/mcp/` — MCP-сервер: `toolDefs.ts` (чистые zod-схемы, БЕЗ electron-импортов — шарятся с npm-пакетом), `tools.ts` (реализация), `bridge.ts` (IPC main→renderer), `index.ts` (HTTP на 12720), `agent-config.ts` (one-click конфиги 11 агентов; пишет `<userData>/mcp/cli.js` + `ELECTRON_RUN_AS_NODE=1`, не npm)
 - `src/renderer/components/McpBridge/` — исполняет MCP-команды в webviews
 - `src/main/screenshot/` — скриншоты кадров (использовать для аннотаций, не изобретать своё)
 - `src/renderer/components/ToolBar/McpPanel/` — UI-панель MCP (toggle, copy-config)
-- `src/renderer/components/AgentDock/` — агент-терминал (xterm.js, FitAddon, общий cwd с самолётиком `baAgentCwd`); нативные модули только в release/app/package.json
 - `src/main/preload-webview.ts` (через `.erb` конфиги `webpack.config.preload-webview`) — инъекция в каждый webview — точка для аннотатор-оверлея
 
 ## Work Guidance
