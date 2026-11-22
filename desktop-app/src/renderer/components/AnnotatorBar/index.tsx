@@ -543,27 +543,30 @@ const AnnotatorBar = () => {
           >
             <BarGlyph name="trash" fontSize={19} />
           </button>
-          {canRestore && (
-            <button
-              type="button"
-              title="Вернуть метки, забранные агентом"
-              aria-label="Вернуть метки, забранные агентом"
-              onClick={() => {
-                listWebviews().forEach((webview) => {
-                  webview
-                    .executeJavaScript(
-                      'window.baAnnotationApi && window.baAnnotationApi.restore && window.baAnnotationApi.restore()',
-                      false
-                    )
-                    .catch(() => undefined);
-                });
-                setCanRestore(false);
-              }}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-amber-300 hover:bg-white/10"
-            >
-              <BarGlyph name="undo" fontSize={18} />
-            </button>
-          )}
+          <button
+            type="button"
+            title={
+              canRestore
+                ? 'Вернуть метки, забранные агентом / очищенные'
+                : 'Откат меток появится после того, как метки заберут/очистят'
+            }
+            aria-label="Вернуть метки, забранные агентом"
+            disabled={!canRestore}
+            onClick={() => {
+              listWebviews().forEach((webview) => {
+                webview
+                  .executeJavaScript(
+                    'window.baAnnotationApi && window.baAnnotationApi.restore && window.baAnnotationApi.restore()',
+                    false
+                  )
+                  .catch(() => undefined);
+              });
+              setCanRestore(false);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-amber-300 hover:bg-white/10 disabled:cursor-default disabled:text-slate-600 disabled:hover:bg-transparent"
+          >
+            <BarGlyph name="undo" fontSize={18} />
+          </button>
           <button
             type="button"
             title="Show annotation list"

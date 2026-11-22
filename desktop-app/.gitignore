@@ -31,3 +31,7 @@ npm-debug.log.*
 # Playwright E2E
 playwright-report/
 test-results/
+
+# Stray webpack/asar scratch output at package root (never commit)
+/main.js
+/preload-webview.js
