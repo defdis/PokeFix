@@ -234,7 +234,8 @@
         "to": "licenses/device-frames-NOTICE.md"
       }
     ],
-    "compression": "maximum"
+    "compression": "maximum",
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "resolutions": {
     "@types/react": "^19.3.0",
